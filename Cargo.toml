@@ -1,0 +1,11 @@
+[package]
+name = "efc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+argh = "0.1"
+smallvec = { version = "1.9", features = ["serde", "const_new"] }
+termion = "1.5"
