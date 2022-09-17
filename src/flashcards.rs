@@ -1,4 +1,5 @@
 use std::{
+    fmt::{Display, Write},
     fs,
     ops::{Index, IndexMut},
     path::Path,
@@ -24,7 +25,11 @@ impl Set {
             Ok(f) => match Set::from_str(&f) {
                 Ok(set) => Some(set),
                 Err(errors) => {
-                    output::write_fatal_error(&format!("{errors:#?}"));
+                    let mut s = String::new();
+                    for error in errors {
+                        writeln!(s, "{error}").unwrap();
+                    }
+                    output::write_fatal_error(&s);
                     None
                 }
             },
@@ -95,7 +100,7 @@ impl FromStr for Set {
                             card[Side::Definition].push(trim(definition).to_owned())
                         }
                         Some((tag, _)) => errors.push(ParseFlashcardItemError::UnknownTag {
-                            tag: tag[1..].to_owned(),
+                            tag: tag.to_owned(),
                             line_number,
                         }),
                         None => errors.push(ParseFlashcardItemError::MissingTag { line_number }),
@@ -198,9 +203,50 @@ pub enum ParseBlockError {
     },
 }
 
+impl Display for ParseBlockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseBlockError::*;
+        match self {
+            UnknownBlock { name, line_number } => {
+                writeln!(f, "Unknown block {name:?} on line {line_number}")?
+            }
+            ParseRecallTypeErrors {
+                errors,
+                line_number,
+            } => {
+                writeln!(f, "Unable to parse recall settings on line {line_number}:")?;
+                for error in errors {
+                    writeln!(f, "  {error}")?;
+                }
+            }
+            ParseFlashcardErrors {
+                errors,
+                line_number,
+            } => {
+                writeln!(f, "Unable to parse flashcard on line {line_number}:")?;
+                for error in errors {
+                    writeln!(f, "  {error}")?;
+                }
+            }
+        };
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub enum ParseRecallTypeError {
     UnknownSetting { name: String, line_number: u32 },
+}
+
+impl Display for ParseRecallTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseRecallTypeError::*;
+        match self {
+            UnknownSetting { name, line_number } => {
+                write!(f, "Unknown setting {name:?} on line {line_number}")
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -208,6 +254,19 @@ pub enum ParseFlashcardItemError {
     MissingTag { line_number: u32 },
     UnknownTag { tag: String, line_number: u32 },
     MissingSide(Side),
+}
+
+impl Display for ParseFlashcardItemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ParseFlashcardItemError::*;
+        match self {
+            MissingTag { line_number } => write!(f, "Missing tag on line {line_number}"),
+            UnknownTag { tag, line_number } => {
+                write!(f, "Unknown tag {tag:?} on line {line_number}")
+            }
+            MissingSide(side) => write!(f, "Missing {side}"),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -306,4 +365,14 @@ impl From<&[&str]> for FlashcardText {
 pub enum Side {
     Term,
     Definition,
+}
+
+impl Display for Side {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Side::*;
+        match self {
+            Term => write!(f, "term"),
+            Definition => write!(f, "definition"),
+        }
+    }
 }
