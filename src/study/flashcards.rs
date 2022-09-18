@@ -1,17 +1,18 @@
 use std::{
     io::{self, Write},
-    iter,
     path::PathBuf,
 };
 
 use argh::FromArgs;
 use crossterm::{
+    cursor::{Hide, Show},
+    event::{self, Event},
     execute, queue,
-    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
 use crate::{
-    flashcards::{Flashcard, Set, Side},
+    flashcards::{Set, Side},
     load_set,
     vec2::Vec2,
 };
@@ -37,7 +38,7 @@ impl Entry {
             .map(|card| (card, Side::Definition))
             .collect::<Vec<_>>();
 
-        let card_count = self.card_count.unwrap_or(Vec2::splat(1));
+        let card_count = self.card_count.unwrap_or_else(|| Vec2::splat(1));
         let mut effective_count = card_count;
         let mut term_size: Vec2<_> = terminal::size()
             .expect("unable to get terminal size")
@@ -53,27 +54,56 @@ impl Entry {
         }
         let mut offset = (term_size - (effective_count * card_size)) / Vec2::splat(2);
 
-        let draw_all_cards = |start_pos| {
+        let draw_all_cards = |start_pos, card_size, count: Vec2<_>, offset| {
             let mut pos = Vec2::splat(0);
             for (card, side) in &cards[start_pos..] {
                 card.draw(pos * card_size + offset, card_size, *side);
                 pos.y += 1;
-                if pos.y >= effective_count.y {
+                if pos.y >= count.y {
                     pos.y = 0;
                     pos.x += 1;
-                    if pos.x >= effective_count.x {
+                    if pos.x >= count.x {
                         break;
                     }
                 }
             }
         };
 
-        queue!(io::stdout(), EnterAlternateScreen).unwrap();
-        draw_all_cards(0);
+        queue!(io::stdout(), EnterAlternateScreen, Hide).unwrap();
+        draw_all_cards(0, card_size, effective_count, offset);
         io::stdout().flush().unwrap();
+        terminal::enable_raw_mode().unwrap();
 
-        io::stdin().read_line(&mut String::new()).unwrap();
-        execute!(io::stdout(), LeaveAlternateScreen).unwrap();
+        loop {
+            match event::read().unwrap_or_else(|err| {
+                execute!(io::stdout(), LeaveAlternateScreen).unwrap();
+                terminal::disable_raw_mode().unwrap();
+                panic!("{}", err)
+            }) {
+                Event::Resize(x, y) => {
+                    effective_count = card_count;
+                    term_size = Vec2::new(x, y);
+                    card_size = term_size / card_count;
+                    if card_size.x < 5 {
+                        card_size.x = 5;
+                        effective_count.x = term_size.x / card_size.x;
+                    }
+                    if card_size.y < 3 {
+                        card_size.y = 3;
+                        effective_count.y = term_size.y / card_size.y;
+                    }
+                    offset = (term_size - (effective_count * card_size)) / Vec2::splat(2);
+                    queue!(io::stdout(), Clear(ClearType::All)).unwrap();
+                    draw_all_cards(0, card_size, effective_count, offset);
+                    io::stdout().flush().unwrap();
+                }
+                Event::Key(_) => break,
+                _ => {}
+            }
+        }
+
+        execute!(io::stdout(), LeaveAlternateScreen, Show).unwrap();
+        terminal::disable_raw_mode().unwrap();
     }
 }
 
