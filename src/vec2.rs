@@ -1,4 +1,7 @@
-use std::{array, ops::Div};
+use std::{
+    array,
+    ops::{Add, Div, Mul, Sub},
+};
 
 use crossterm::cursor::MoveTo;
 
@@ -79,6 +82,30 @@ impl<T> IntoIterator for Vec2<T> {
 impl<T> From<(T, T)> for Vec2<T> {
     fn from((x, y): (T, T)) -> Self {
         Vec2 { x, y }
+    }
+}
+
+impl<T: Add<U>, U> Add<Vec2<U>> for Vec2<T> {
+    type Output = Vec2<<T as Add<U>>::Output>;
+
+    fn add(self, rhs: Vec2<U>) -> Self::Output {
+        self.join(rhs, |s, o| s + o)
+    }
+}
+
+impl<T: Sub<U>, U> Sub<Vec2<U>> for Vec2<T> {
+    type Output = Vec2<<T as Sub<U>>::Output>;
+
+    fn sub(self, rhs: Vec2<U>) -> Self::Output {
+        self.join(rhs, |s, o| s - o)
+    }
+}
+
+impl<T: Mul<U>, U> Mul<Vec2<U>> for Vec2<T> {
+    type Output = Vec2<<T as Mul<U>>::Output>;
+
+    fn mul(self, rhs: Vec2<U>) -> Self::Output {
+        self.join(rhs, |s, o| s * o)
     }
 }
 

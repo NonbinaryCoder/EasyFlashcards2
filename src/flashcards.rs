@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossterm::{
-    cursor::{MoveDown, MoveRight, MoveToColumn},
+    cursor::{MoveDown, MoveToColumn},
     queue,
     style::{Color, Print, SetForegroundColor},
 };
