@@ -1,16 +1,25 @@
 use std::{
     fmt::{Display, Write},
-    fs,
+    fs, io,
     ops::{Index, IndexMut},
     path::Path,
     str::FromStr,
 };
 
+use crossterm::{
+    cursor::{MoveDown, MoveRight, MoveToColumn},
+    queue,
+    style::{Color, Print, SetForegroundColor},
+};
+use rand::seq::SliceRandom;
 use smallvec::{smallvec, SmallVec};
 
-use crate::output;
+use crate::{
+    output::{self, word_wrap::WordWrap, Repeat},
+    vec2::Vec2,
+};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Set {
     pub recall_t: RecallSettings,
     pub recall_d: RecallSettings,
@@ -269,13 +278,23 @@ impl Display for ParseFlashcardItemError {
     }
 }
 
-#[derive(Debug, Default)]
+#[macro_export]
+macro_rules! load_set {
+    ($path:expr) => {
+        match Set::load_from_file_path($path) {
+            Some(set) => set,
+            None => return,
+        }
+    };
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct RecallSettings {
     matching: bool,
     text: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Flashcard {
     pub term: FlashcardText,
     pub definition: FlashcardText,
@@ -294,6 +313,64 @@ impl Flashcard {
     /// A flashcard is valid if it has at least 1 term and at least 1 definition
     fn is_valid(&self) -> bool {
         self.term.is_valid() && self.definition.is_valid()
+    }
+
+    /// Draws a flashcard on screen.  Does not flush stdout
+    ///
+    /// # Panics
+    ///
+    /// Panics if size is not at least 5x3
+    pub fn draw(&self, position: Vec2<u16>, size: Vec2<u16>, side: Side) {
+        assert!(size.x >= 5 && size.y >= 3);
+
+        let lines = {
+            let mut lines = WordWrap::new(self[side].random(), size.x as usize - 2);
+            let mut vec = Vec::from_iter(lines.by_ref().take(size.y as usize - 2));
+            if lines.next().is_some() {
+                if let Some(line) = vec.last_mut() {
+                    let line = line.to_mut();
+                    let mut len = line.chars().count();
+                    while len > (size.x - 5) as usize {
+                        line.pop();
+                        len -= 1;
+                    }
+                    line.push_str("...");
+                }
+            }
+            vec
+        };
+        let lines_start = ((size.y as usize - 2) / 2) - (lines.len() / 2);
+
+        let mut stdout = io::stdout();
+        queue!(
+            stdout,
+            position.move_to(),
+            SetForegroundColor(side.color()),
+            Print('┏'),
+            Print(Repeat('━', size.x - 2)),
+            Print('┓'),
+        )
+        .unwrap();
+        for line in 0..(size.y as usize - 2) {
+            queue!(stdout, MoveDown(1), MoveToColumn(position.x), Print('┃'),).unwrap();
+            if line >= lines_start {
+                if let Some(line) = lines.get(line - lines_start) {
+                    let offset = ((size.x - 2) / 2) - (line.chars().count() as u16 / 2) + 1;
+                    queue!(stdout, MoveToColumn(position.x + offset), Print(line)).unwrap();
+                }
+            }
+            queue!(stdout, MoveToColumn(position.x + size.x - 1), Print('┃'),).unwrap();
+        }
+        queue!(
+            stdout,
+            MoveDown(1),
+            MoveToColumn(position.x),
+            SetForegroundColor(side.color()),
+            Print('┗'),
+            Print(Repeat('━', size.x - 2)),
+            Print('┛'),
+        )
+        .unwrap();
     }
 }
 
@@ -317,7 +394,7 @@ impl IndexMut<Side> for Flashcard {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FlashcardText(SmallVec<[String; 1]>);
 
 impl FlashcardText {
@@ -334,6 +411,10 @@ impl FlashcardText {
 
     pub fn push(&mut self, val: String) {
         self.0.push(val);
+    }
+
+    pub fn random(&self) -> &str {
+        self.0.choose(&mut rand::thread_rng()).unwrap()
     }
 }
 
@@ -361,10 +442,20 @@ impl From<&[&str]> for FlashcardText {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Side {
     Term,
     Definition,
+}
+
+impl Side {
+    pub fn color(self) -> Color {
+        use Side::*;
+        match self {
+            Term => Color::Blue,
+            Definition => Color::Green,
+        }
+    }
 }
 
 impl Display for Side {

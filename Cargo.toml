@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 argh = "0.1"
 smallvec = { version = "1.9", features = ["serde", "const_new"] }
-termion = "1.5"
+crossterm = "0.25"
+rand = "0.8"

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use argh::FromArgs;
 
-use crate::flashcards::Set;
+use crate::{flashcards::Set, load_set};
 
 /// Debug a flashcard set
 #[derive(Debug, FromArgs)]
@@ -15,8 +15,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn run(self) {
-        if let Some(set) = Set::load_from_file_path(&self.set) {
-            dbg!(set);
-        }
+        let set = load_set!(&self.set);
+        dbg!(set);
     }
 }

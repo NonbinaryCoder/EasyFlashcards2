@@ -4,6 +4,7 @@ mod debug;
 mod flashcards;
 mod output;
 mod study;
+mod vec2;
 
 /// "Simple" flashcards app
 #[derive(Debug, FromArgs)]

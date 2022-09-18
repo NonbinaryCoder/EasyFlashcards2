@@ -1,4 +1,4 @@
-use std::{borrow::Cow, mem};
+use std::{borrow::Cow, iter::FusedIterator, mem};
 
 pub struct WordWrap<'a> {
     text: &'a str,
@@ -47,6 +47,8 @@ impl<'a> Iterator for WordWrap<'a> {
             .then(|| mem::take(&mut self.text).into())
     }
 }
+
+impl FusedIterator for WordWrap<'_> {}
 
 pub struct SplitKeepWhitespace<'a> {
     text: &'a str,
