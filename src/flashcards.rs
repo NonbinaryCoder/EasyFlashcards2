@@ -9,7 +9,7 @@ use std::{
 use crossterm::{
     cursor::{MoveDown, MoveToColumn},
     queue,
-    style::{Color, Print, SetForegroundColor},
+    style::{Attribute, Color, Print, SetAttribute, SetForegroundColor},
 };
 use rand::seq::SliceRandom;
 use smallvec::{smallvec, SmallVec};
@@ -308,7 +308,7 @@ impl Flashcard {
         }
     }
 
-    /// Returns true if this is valid
+    /// Returns true if this is valid.  Invalid cards should not be allowed to escape
     ///
     /// A flashcard is valid if it has at least 1 term and at least 1 definition
     fn is_valid(&self) -> bool {
@@ -320,8 +320,16 @@ impl Flashcard {
     /// # Panics
     ///
     /// Panics if size is not at least 5x3
-    pub fn draw(&self, position: Vec2<u16>, size: Vec2<u16>, side: Side) {
+    pub fn draw(&self, position: Vec2<u16>, size: Vec2<u16>, side: Side, bold: bool) {
         assert!(size.x >= 5 && size.y >= 3);
+
+        let mut stdout = io::stdout();
+        let (c_t_l, c_t_r, c_b_l, c_b_r, l_h, l_v) = if !bold {
+            ('┏', '┓', '┗', '┛', '━', '┃')
+        } else {
+            queue!(stdout, SetAttribute(Attribute::Bold)).unwrap();
+            ('╔', '╗', '╚', '╝', '═', '║')
+        };
 
         let lines = {
             let mut lines = WordWrap::new(self[side].random(), size.x as usize - 2);
@@ -341,36 +349,38 @@ impl Flashcard {
         };
         let lines_start = ((size.y as usize - 2) / 2) - (lines.len() / 2);
 
-        let mut stdout = io::stdout();
         queue!(
             stdout,
             position.move_to(),
             SetForegroundColor(side.color()),
-            Print('┏'),
-            Print(Repeat('━', size.x - 2)),
-            Print('┓'),
+            Print(c_t_l),
+            Print(Repeat(l_h, size.x - 2)),
+            Print(c_t_r),
         )
         .unwrap();
         for line in 0..(size.y as usize - 2) {
-            queue!(stdout, MoveDown(1), MoveToColumn(position.x), Print('┃'),).unwrap();
+            queue!(stdout, MoveDown(1), MoveToColumn(position.x), Print(l_v),).unwrap();
             if line >= lines_start {
                 if let Some(line) = lines.get(line - lines_start) {
                     let offset = ((size.x - 2) / 2) - (line.chars().count() as u16 / 2) + 1;
                     queue!(stdout, MoveToColumn(position.x + offset), Print(line)).unwrap();
                 }
             }
-            queue!(stdout, MoveToColumn(position.x + size.x - 1), Print('┃'),).unwrap();
+            queue!(stdout, MoveToColumn(position.x + size.x - 1), Print(l_v),).unwrap();
         }
         queue!(
             stdout,
             MoveDown(1),
             MoveToColumn(position.x),
             SetForegroundColor(side.color()),
-            Print('┗'),
-            Print(Repeat('━', size.x - 2)),
-            Print('┛'),
+            Print(c_b_l),
+            Print(Repeat(l_h, size.x - 2)),
+            Print(c_b_r),
         )
         .unwrap();
+        if bold {
+            queue!(stdout, SetAttribute(Attribute::NormalIntensity)).unwrap();
+        }
     }
 }
 

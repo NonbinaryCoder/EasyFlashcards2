@@ -39,25 +39,26 @@ impl Entry {
             .collect::<Vec<_>>();
 
         let card_count = self.card_count.unwrap_or_else(|| Vec2::splat(1));
-        let mut effective_count = card_count;
         let mut term_size: Vec2<_> = terminal::size()
             .expect("unable to get terminal size")
             .into();
         let mut card_size = term_size / card_count;
+        let mut too_small = false;
         if card_size.x < 5 {
             card_size.x = 5;
-            effective_count.x = term_size.x / card_size.x;
+            too_small = true;
         }
         if card_size.y < 3 {
             card_size.y = 3;
-            effective_count.y = term_size.y / card_size.y;
+            too_small = true;
         }
-        let mut offset = (term_size - (effective_count * card_size)) / Vec2::splat(2);
+        let mut offset;
+        let mut selected = Vec2::splat(0);
 
-        let draw_all_cards = |start_pos, card_size, count: Vec2<_>, offset| {
+        let draw_all_cards = |start_pos, card_size, count: Vec2<_>, selected, offset| {
             let mut pos = Vec2::splat(0);
             for (card, side) in &cards[start_pos..] {
-                card.draw(pos * card_size + offset, card_size, *side);
+                card.draw(pos * card_size + offset, card_size, *side, pos == selected);
                 pos.y += 1;
                 if pos.y >= count.y {
                     pos.y = 0;
@@ -70,7 +71,10 @@ impl Entry {
         };
 
         queue!(io::stdout(), EnterAlternateScreen, Hide).unwrap();
-        draw_all_cards(0, card_size, effective_count, offset);
+        if !too_small {
+            offset = (term_size - (card_count * card_size)) / Vec2::splat(2);
+            draw_all_cards(0, card_size, card_count, selected, offset);
+        }
         io::stdout().flush().unwrap();
         terminal::enable_raw_mode().unwrap();
 
@@ -81,21 +85,23 @@ impl Entry {
                 panic!("{}", err)
             }) {
                 Event::Resize(x, y) => {
-                    effective_count = card_count;
                     term_size = Vec2::new(x, y);
                     card_size = term_size / card_count;
+                    too_small = false;
                     if card_size.x < 5 {
                         card_size.x = 5;
-                        effective_count.x = term_size.x / card_size.x;
+                        too_small = true;
                     }
                     if card_size.y < 3 {
                         card_size.y = 3;
-                        effective_count.y = term_size.y / card_size.y;
+                        too_small = true;
                     }
-                    offset = (term_size - (effective_count * card_size)) / Vec2::splat(2);
-                    queue!(io::stdout(), Clear(ClearType::All)).unwrap();
-                    draw_all_cards(0, card_size, effective_count, offset);
-                    io::stdout().flush().unwrap();
+                    if !too_small {
+                        offset = (term_size - (card_count * card_size)) / Vec2::splat(2);
+                        queue!(io::stdout(), Clear(ClearType::All)).unwrap();
+                        draw_all_cards(0, card_size, card_count, selected, offset);
+                        io::stdout().flush().unwrap();
+                    }
                 }
                 Event::Key(_) => break,
                 _ => {}
