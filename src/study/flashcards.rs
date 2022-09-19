@@ -5,15 +5,15 @@ use std::{
 
 use argh::FromArgs;
 use crossterm::{
-    cursor::{Hide, Show},
     event::{self, Event},
     execute, queue,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{self, Clear, ClearType, LeaveAlternateScreen},
 };
 
 use crate::{
     flashcards::{Set, Side},
     load_set,
+    output::TerminalSettings,
     vec2::Vec2,
 };
 
@@ -70,7 +70,11 @@ impl Entry {
             }
         };
 
-        queue!(io::stdout(), EnterAlternateScreen, Hide).unwrap();
+        let mut term_settings = TerminalSettings::new();
+        term_settings
+            .enter_alternate_screen()
+            .hide_cursor()
+            .enable_raw_mode();
         if !too_small {
             offset = (term_size - (card_count * card_size)) / Vec2::splat(2);
             draw_all_cards(0, card_size, card_count, selected, offset);
@@ -108,8 +112,7 @@ impl Entry {
             }
         }
 
-        execute!(io::stdout(), LeaveAlternateScreen, Show).unwrap();
-        terminal::disable_raw_mode().unwrap();
+        drop(term_settings);
     }
 }
 
