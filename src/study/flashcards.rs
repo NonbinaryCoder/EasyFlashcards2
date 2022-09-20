@@ -6,8 +6,7 @@ use std::{
 use argh::FromArgs;
 use crossterm::{
     event::{self, Event},
-    execute, queue,
-    terminal::{self, Clear, ClearType, LeaveAlternateScreen},
+    execute, queue, terminal,
 };
 
 use crate::{
@@ -84,7 +83,7 @@ impl Entry {
 
         loop {
             match event::read().unwrap_or_else(|err| {
-                execute!(io::stdout(), LeaveAlternateScreen).unwrap();
+                execute!(io::stdout(), terminal::LeaveAlternateScreen).unwrap();
                 terminal::disable_raw_mode().unwrap();
                 panic!("{}", err)
             }) {
@@ -102,7 +101,7 @@ impl Entry {
                     }
                     if !too_small {
                         offset = (term_size - (card_count * card_size)) / Vec2::splat(2);
-                        queue!(io::stdout(), Clear(ClearType::All)).unwrap();
+                        queue!(io::stdout(), terminal::Clear(terminal::ClearType::All)).unwrap();
                         draw_all_cards(0, card_size, card_count, selected, offset);
                         io::stdout().flush().unwrap();
                     }

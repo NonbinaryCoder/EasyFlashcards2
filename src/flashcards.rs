@@ -7,9 +7,8 @@ use std::{
 };
 
 use crossterm::{
-    cursor::{MoveDown, MoveToColumn},
-    queue,
-    style::{Attribute, Color, Print, SetAttribute, SetForegroundColor},
+    cursor, queue,
+    style::{self, Attribute, Color},
 };
 use rand::seq::SliceRandom;
 use smallvec::{smallvec, SmallVec};
@@ -327,7 +326,7 @@ impl Flashcard {
         let (c_t_l, c_t_r, c_b_l, c_b_r, l_h, l_v) = if !bold {
             ('┏', '┓', '┗', '┛', '━', '┃')
         } else {
-            queue!(stdout, SetAttribute(Attribute::Bold)).unwrap();
+            queue!(stdout, style::SetAttribute(Attribute::Bold)).unwrap();
             ('╔', '╗', '╚', '╝', '═', '║')
         };
 
@@ -352,34 +351,50 @@ impl Flashcard {
         queue!(
             stdout,
             position.move_to(),
-            SetForegroundColor(side.color()),
-            Print(c_t_l),
-            Print(Repeat(l_h, size.x - 2)),
-            Print(c_t_r),
+            style::SetForegroundColor(side.color()),
+            style::Print(c_t_l),
+            style::Print(Repeat(l_h, size.x - 2)),
+            style::Print(c_t_r),
         )
         .unwrap();
         for line in 0..(size.y as usize - 2) {
-            queue!(stdout, MoveDown(1), MoveToColumn(position.x), Print(l_v),).unwrap();
+            queue!(
+                stdout,
+                cursor::MoveDown(1),
+                cursor::MoveToColumn(position.x),
+                style::Print(l_v),
+            )
+            .unwrap();
             if line >= lines_start {
                 if let Some(line) = lines.get(line - lines_start) {
                     let offset = ((size.x - 2) / 2) - (line.chars().count() as u16 / 2) + 1;
-                    queue!(stdout, MoveToColumn(position.x + offset), Print(line)).unwrap();
+                    queue!(
+                        stdout,
+                        cursor::MoveToColumn(position.x + offset),
+                        style::Print(line)
+                    )
+                    .unwrap();
                 }
             }
-            queue!(stdout, MoveToColumn(position.x + size.x - 1), Print(l_v),).unwrap();
+            queue!(
+                stdout,
+                cursor::MoveToColumn(position.x + size.x - 1),
+                style::Print(l_v),
+            )
+            .unwrap();
         }
         queue!(
             stdout,
-            MoveDown(1),
-            MoveToColumn(position.x),
-            SetForegroundColor(side.color()),
-            Print(c_b_l),
-            Print(Repeat(l_h, size.x - 2)),
-            Print(c_b_r),
+            cursor::MoveDown(1),
+            cursor::MoveToColumn(position.x),
+            style::SetForegroundColor(side.color()),
+            style::Print(c_b_l),
+            style::Print(Repeat(l_h, size.x - 2)),
+            style::Print(c_b_r),
         )
         .unwrap();
         if bold {
-            queue!(stdout, SetAttribute(Attribute::NormalIntensity)).unwrap();
+            queue!(stdout, style::SetAttribute(Attribute::NormalIntensity)).unwrap();
         }
     }
 }
