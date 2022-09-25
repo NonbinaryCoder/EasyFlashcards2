@@ -1,22 +1,16 @@
 use std::{
     fmt::{Display, Write},
-    fs, io,
+    fs,
     ops::{Index, IndexMut},
     path::Path,
     str::FromStr,
 };
 
-use crossterm::{
-    cursor, queue,
-    style::{self, Attribute, Color},
-};
+use crossterm::style::Color;
 use rand::seq::SliceRandom;
 use smallvec::{smallvec, SmallVec};
 
-use crate::{
-    output::{self, word_wrap::WordWrap, Repeat},
-    vec2::Vec2,
-};
+use crate::output;
 
 #[derive(Debug, Default, Clone)]
 pub struct Set {
@@ -312,90 +306,6 @@ impl Flashcard {
     /// A flashcard is valid if it has at least 1 term and at least 1 definition
     fn is_valid(&self) -> bool {
         self.term.is_valid() && self.definition.is_valid()
-    }
-
-    /// Draws a flashcard on screen.  Does not flush stdout
-    ///
-    /// # Panics
-    ///
-    /// Panics if size is not at least 5x3
-    pub fn draw(&self, position: Vec2<u16>, size: Vec2<u16>, side: Side, bold: bool) {
-        assert!(size.x >= 5 && size.y >= 3);
-
-        let mut stdout = io::stdout();
-        let (c_t_l, c_t_r, c_b_l, c_b_r, l_h, l_v) = if !bold {
-            ('┏', '┓', '┗', '┛', '━', '┃')
-        } else {
-            queue!(stdout, style::SetAttribute(Attribute::Bold)).unwrap();
-            ('╔', '╗', '╚', '╝', '═', '║')
-        };
-
-        let lines = {
-            let mut lines = WordWrap::new(self[side].random(), size.x as usize - 2);
-            let mut vec = Vec::from_iter(lines.by_ref().take(size.y as usize - 2));
-            if lines.next().is_some() {
-                if let Some(line) = vec.last_mut() {
-                    let line = line.to_mut();
-                    let mut len = line.chars().count();
-                    while len > (size.x - 5) as usize {
-                        line.pop();
-                        len -= 1;
-                    }
-                    line.push_str("...");
-                }
-            }
-            vec
-        };
-        let lines_start = ((size.y as usize - 2) / 2) - (lines.len() / 2);
-
-        queue!(
-            stdout,
-            position.move_to(),
-            style::SetForegroundColor(side.color()),
-            style::Print(c_t_l),
-            style::Print(Repeat(l_h, size.x - 2)),
-            style::Print(c_t_r),
-        )
-        .unwrap();
-        for line in 0..(size.y as usize - 2) {
-            queue!(
-                stdout,
-                cursor::MoveDown(1),
-                cursor::MoveToColumn(position.x),
-                style::Print(l_v),
-            )
-            .unwrap();
-            if line >= lines_start {
-                if let Some(line) = lines.get(line - lines_start) {
-                    let offset = ((size.x - 2) / 2) - (line.chars().count() as u16 / 2) + 1;
-                    queue!(
-                        stdout,
-                        cursor::MoveToColumn(position.x + offset),
-                        style::Print(line)
-                    )
-                    .unwrap();
-                }
-            }
-            queue!(
-                stdout,
-                cursor::MoveToColumn(position.x + size.x - 1),
-                style::Print(l_v),
-            )
-            .unwrap();
-        }
-        queue!(
-            stdout,
-            cursor::MoveDown(1),
-            cursor::MoveToColumn(position.x),
-            style::SetForegroundColor(side.color()),
-            style::Print(c_b_l),
-            style::Print(Repeat(l_h, size.x - 2)),
-            style::Print(c_b_r),
-        )
-        .unwrap();
-        if bold {
-            queue!(stdout, style::SetAttribute(Attribute::NormalIntensity)).unwrap();
-        }
     }
 }
 

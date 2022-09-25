@@ -6,13 +6,15 @@ use std::{
 use argh::FromArgs;
 use crossterm::{
     event::{self, Event},
-    execute, queue, terminal,
+    execute, queue,
+    style::Attribute,
+    terminal,
 };
 
 use crate::{
     flashcards::{Set, Side},
     load_set,
-    output::TerminalSettings,
+    output::{BoxOutline, TerminalSettings, TextBox},
     vec2::Vec2,
 };
 
@@ -34,40 +36,62 @@ impl Entry {
         let cards = set
             .cards
             .into_iter()
-            .map(|card| (card, Side::Definition))
+            .map(|card| (card, Side::Term))
             .collect::<Vec<_>>();
 
         let card_count = self.card_count.unwrap_or_else(|| Vec2::splat(1));
         let mut term_size: Vec2<_> = terminal::size()
             .expect("unable to get terminal size")
             .into();
-        let mut card_size = term_size / card_count;
         let mut too_small = false;
-        if card_size.x < 5 {
-            card_size.x = 5;
-            too_small = true;
-        }
-        if card_size.y < 3 {
-            card_size.y = 3;
-            too_small = true;
-        }
+        let mut card_printer = TextBox::new();
+        card_printer.outline(Some(BoxOutline::HEAVY));
+        card_printer.text_align_h(crate::output::TextAlignH::Center);
+        card_printer.text_align_v(crate::output::TextAlignV::Center);
+        card_printer.size({
+            let mut card_size = term_size / card_count;
+            if card_size.x < 5 {
+                card_size.x = 5;
+                too_small = true;
+            }
+            if card_size.y < 3 {
+                card_size.y = 3;
+                too_small = true;
+            }
+            card_size
+        });
         let mut offset;
         let mut selected = Vec2::splat(0);
 
-        let draw_all_cards = |start_pos, card_size, count: Vec2<_>, selected, offset| {
-            let mut pos = Vec2::splat(0);
-            for (card, side) in &cards[start_pos..] {
-                card.draw(pos * card_size + offset, card_size, *side, pos == selected);
-                pos.y += 1;
-                if pos.y >= count.y {
-                    pos.y = 0;
-                    pos.x += 1;
-                    if pos.x >= count.x {
-                        break;
+        let draw_all_cards =
+            |start_pos, selected, offset, count: Vec2<_>, card_printer: &mut TextBox| {
+                let mut pos = Vec2::splat(0);
+                for (card, side) in &cards[start_pos..] {
+                    if pos == selected {
+                        card_printer
+                            .set_attribute(Attribute::Bold)
+                            .outline(Some(BoxOutline::DOUBLE));
+                    }
+                    card_printer
+                        .pos(pos * *card_printer.get_size() + offset)
+                        .color(side.color())
+                        .draw_outline_and_text(card[*side].random());
+                    if pos == selected {
+                        card_printer
+                            .unset_attribute(Attribute::Bold)
+                            .outline(Some(BoxOutline::HEAVY));
+                    }
+
+                    pos.y += 1;
+                    if pos.y >= count.y {
+                        pos.y = 0;
+                        pos.x += 1;
+                        if pos.x >= count.x {
+                            break;
+                        }
                     }
                 }
-            }
-        };
+            };
 
         let mut term_settings = TerminalSettings::new();
         term_settings
@@ -75,8 +99,8 @@ impl Entry {
             .hide_cursor()
             .enable_raw_mode();
         if !too_small {
-            offset = (term_size - (card_count * card_size)) / Vec2::splat(2);
-            draw_all_cards(0, card_size, card_count, selected, offset);
+            offset = (term_size - (card_count * *card_printer.get_size())) / Vec2::splat(2);
+            draw_all_cards(0, selected, offset, card_count, &mut card_printer);
         }
         io::stdout().flush().unwrap();
         terminal::enable_raw_mode().unwrap();
@@ -89,20 +113,24 @@ impl Entry {
             }) {
                 Event::Resize(x, y) => {
                     term_size = Vec2::new(x, y);
-                    card_size = term_size / card_count;
                     too_small = false;
-                    if card_size.x < 5 {
-                        card_size.x = 5;
-                        too_small = true;
-                    }
-                    if card_size.y < 3 {
-                        card_size.y = 3;
-                        too_small = true;
-                    }
+                    card_printer.size({
+                        let mut card_size = term_size / card_count;
+                        if card_size.x < 5 {
+                            card_size.x = 5;
+                            too_small = true;
+                        }
+                        if card_size.y < 3 {
+                            card_size.y = 3;
+                            too_small = true;
+                        }
+                        card_size
+                    });
                     if !too_small {
-                        offset = (term_size - (card_count * card_size)) / Vec2::splat(2);
+                        offset =
+                            (term_size - (card_count * *card_printer.get_size())) / Vec2::splat(2);
                         queue!(io::stdout(), terminal::Clear(terminal::ClearType::All)).unwrap();
-                        draw_all_cards(0, card_size, card_count, selected, offset);
+                        draw_all_cards(0, selected, offset, card_count, &mut card_printer);
                         io::stdout().flush().unwrap();
                     }
                 }

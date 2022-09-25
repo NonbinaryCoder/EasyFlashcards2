@@ -10,3 +10,5 @@ argh = "0.1"
 smallvec = { version = "1.9", features = ["serde", "const_new"] }
 crossterm = "0.25"
 rand = "0.8"
+builder_impl = { git = "https://github.com/NonbinaryCoder/builder_impl" }
+paste = "1.0"
