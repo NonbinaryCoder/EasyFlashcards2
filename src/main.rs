@@ -2,6 +2,7 @@ use argh::FromArgs;
 
 mod debug;
 mod flashcards;
+mod input;
 mod output;
 mod study;
 mod vec2;
@@ -25,44 +26,4 @@ fn main() {
         Subcommand::Debug(cmd) => cmd.run(),
         Subcommand::Flashcards(cmd) => cmd.run(),
     }
-}
-
-#[macro_export]
-macro_rules! up {
-    () => {
-        crossterm::event::Event::Key(crossterm::event::KeyEvent {
-            code: crossterm::event::KeyCode::Up,
-            ..
-        })
-    };
-}
-
-#[macro_export]
-macro_rules! down {
-    () => {
-        crossterm::event::Event::Key(crossterm::event::KeyEvent {
-            code: crossterm::event::KeyCode::Down,
-            ..
-        })
-    };
-}
-
-#[macro_export]
-macro_rules! left {
-    () => {
-        crossterm::event::Event::Key(crossterm::event::KeyEvent {
-            code: crossterm::event::KeyCode::Left,
-            ..
-        })
-    };
-}
-
-#[macro_export]
-macro_rules! right {
-    () => {
-        crossterm::event::Event::Key(crossterm::event::KeyEvent {
-            code: crossterm::event::KeyCode::Right,
-            ..
-        })
-    };
 }

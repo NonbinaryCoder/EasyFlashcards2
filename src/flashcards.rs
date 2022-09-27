@@ -1,13 +1,12 @@
 use std::{
     fmt::{Display, Write},
     fs,
-    ops::{Index, IndexMut},
+    ops::{Index, IndexMut, Not},
     path::Path,
     str::FromStr,
 };
 
 use crossterm::style::Color;
-use rand::seq::SliceRandom;
 use smallvec::{smallvec, SmallVec};
 
 use crate::output;
@@ -348,8 +347,8 @@ impl FlashcardText {
         self.0.push(val);
     }
 
-    pub fn random(&self) -> &str {
-        self.0.choose(&mut rand::thread_rng()).unwrap()
+    pub fn first(&self) -> &str {
+        self.0.first().unwrap()
     }
 }
 
@@ -399,6 +398,18 @@ impl Display for Side {
         match self {
             Term => write!(f, "term"),
             Definition => write!(f, "definition"),
+        }
+    }
+}
+
+impl Not for Side {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        use Side::*;
+        match self {
+            Term => Definition,
+            Definition => Term,
         }
     }
 }

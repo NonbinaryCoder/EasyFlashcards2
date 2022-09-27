@@ -109,10 +109,9 @@ impl TextBox {
     /// # Panics
     ///
     /// Panics if size is not at least 5x3 (outlined) or at least 3x1 (no outline)
-    pub fn draw_outline_and_text(&self, text: &str) {
+    pub fn draw_outline_and_text(&self, text: &str) -> &Self {
         // TODO: improve rendering?
-        self.draw_outline();
-        self.draw_text(text);
+        self.draw_outline().draw_text(text)
     }
 
     /// Draws just the outline of this, or does nothing if `self.outline` is `None`
@@ -120,7 +119,7 @@ impl TextBox {
     /// # Panics
     ///
     /// Panics if size is not at least 2x2 and this is outlined
-    pub fn draw_outline(&self) {
+    pub fn draw_outline(&self) -> &Self {
         if let Some(outline) = self.outline {
             assert!(self.size.x >= 2 && self.size.y >= 2);
 
@@ -155,6 +154,7 @@ impl TextBox {
             )
             .unwrap();
         }
+        self
     }
 
     /// Draws just the text of this
@@ -162,7 +162,18 @@ impl TextBox {
     /// # Panics
     ///
     /// Panics if size is not at least 5x3 (outlined) or at least 3x1 (no outline)
-    pub fn draw_text(&self, text: &str) {
+    pub fn draw_text(&self, text: &str) -> &Self {
+        let lines_iter = self.get_lines_iter(text);
+
+        match self.text_align_h {
+            TextAlignH::Left => self.draw_text_left_align(lines_iter),
+            TextAlignH::Center => self.draw_text_center_align(lines_iter),
+            TextAlignH::Right => self.draw_text_right_align(lines_iter),
+        }
+        self
+    }
+
+    fn get_lines_iter<'a>(&self, text: &'a str) -> impl Iterator<Item = Cow<'a, str>> {
         let inner_size = self.inner_size();
 
         enum LinesIter<'a> {
@@ -187,7 +198,7 @@ impl TextBox {
             }
         }
 
-        let lines_iter = match self.text_align_v {
+        match self.text_align_v {
             TextAlignV::Top => LinesIter::Top(WordWrap::new(text, inner_size.x as usize)),
             _ => {
                 let lines = {
@@ -216,12 +227,6 @@ impl TextBox {
                     },
                 )
             }
-        };
-
-        match self.text_align_h {
-            TextAlignH::Left => self.draw_text_left_align(lines_iter),
-            TextAlignH::Center => self.draw_text_center_align(lines_iter),
-            TextAlignH::Right => self.draw_text_right_align(lines_iter),
         }
     }
 
@@ -297,6 +302,228 @@ impl TextBox {
                 )
                 .unwrap();
             }
+        }
+    }
+
+    /// Draws just the text of this, replacing the previous text
+    /// Behavior is unspecified when the text align used for `old_text` is
+    /// different from the current text align of this
+    ///
+    /// # Panics
+    ///
+    /// Panics if size is not at least 5x3 (outlined) or at least 3x1 (no outline)
+    pub fn overwrite_text(&self, old_text: &str, new_text: &str) -> &Self {
+        let old_lines = self.get_lines_iter(old_text);
+        let new_lines = self.get_lines_iter(new_text);
+
+        match self.text_align_h {
+            TextAlignH::Left => self.overwrite_text_left_align(old_lines, new_lines),
+            TextAlignH::Center => self.overwrite_text_center_align(old_lines, new_lines),
+            TextAlignH::Right => self.overwrite_text_right_align(old_lines, new_lines),
+        }
+        self
+    }
+
+    fn overwrite_text_left_align<'a>(
+        &self,
+        old_lines: impl Iterator<Item = Cow<'a, str>>,
+        new_lines: impl Iterator<Item = Cow<'a, str>>,
+    ) {
+        let inner_size = self.inner_size();
+        let corner_pos = if self.outline.is_some() {
+            self.pos + Vec2::splat(1)
+        } else {
+            self.pos
+        };
+
+        let old_lines = old_lines.take(inner_size.y as usize);
+        let mut new_lines = new_lines.take(inner_size.y as usize);
+
+        queue!(
+            io::stdout(),
+            corner_pos.move_to(),
+            style::SetForegroundColor(self.content_color),
+            style::SetAttributes(self.attributes)
+        )
+        .unwrap();
+        for old_line in old_lines {
+            let old_line_len = old_line.chars().count();
+            if let Some(new_line) = new_lines.next().filter(|l| !l.is_empty()) {
+                let extra_len = old_line_len
+                    .checked_sub(new_line.chars().count())
+                    .unwrap_or_default();
+                queue!(
+                    io::stdout(),
+                    style::Print(new_line),
+                    style::Print(Repeat(' ', extra_len as u16)),
+                    cursor::MoveDown(1),
+                    cursor::MoveToColumn(corner_pos.x)
+                )
+                .unwrap();
+            } else {
+                queue!(
+                    io::stdout(),
+                    style::Print(Repeat(' ', old_line_len as u16)),
+                    cursor::MoveDown(1),
+                    cursor::MoveToColumn(corner_pos.x)
+                )
+                .unwrap();
+            }
+        }
+        for line in new_lines {
+            queue!(
+                io::stdout(),
+                style::Print(line),
+                cursor::MoveDown(1),
+                cursor::MoveToColumn(corner_pos.x)
+            )
+            .unwrap();
+        }
+    }
+
+    fn overwrite_text_center_align<'a>(
+        &self,
+        old_lines: impl Iterator<Item = Cow<'a, str>>,
+        new_lines: impl Iterator<Item = Cow<'a, str>>,
+    ) {
+        let inner_size = self.inner_size();
+        let corner_pos = if self.outline.is_some() {
+            self.pos + Vec2::splat(1)
+        } else {
+            self.pos
+        };
+
+        let old_lines = old_lines.take(inner_size.y as usize);
+        let mut new_lines = new_lines.take(inner_size.y as usize);
+        let mut index = 0;
+
+        for old_line in old_lines {
+            let old_line_len = old_line.chars().count();
+            if let Some(new_line) = new_lines.next().filter(|l| !l.is_empty()) {
+                let new_line_len = new_line.chars().count();
+                if new_line_len >= old_line_len {
+                    queue!(
+                        io::stdout(),
+                        cursor::MoveTo(
+                            corner_pos.x + ((inner_size.x - new_line_len as u16) / 2),
+                            corner_pos.y + index as u16,
+                        ),
+                        style::Print(new_line),
+                    )
+                    .unwrap();
+                } else {
+                    let old_line_start = (inner_size.x - old_line_len as u16) / 2;
+                    let old_line_end = old_line_start + inner_size.x;
+                    let new_line_start = (inner_size.x - new_line_len as u16) / 2;
+                    let new_line_end = new_line_start + inner_size.x + 1;
+                    queue!(
+                        io::stdout(),
+                        cursor::MoveTo(corner_pos.x + old_line_start, corner_pos.y + index),
+                        style::Print(Repeat(' ', new_line_start - old_line_start)),
+                        style::Print(new_line),
+                        style::Print(Repeat(
+                            ' ',
+                            (new_line_end - old_line_end).min(
+                                inner_size.x
+                                    - (new_line_start - old_line_start)
+                                    - new_line_len as u16
+                            )
+                        ))
+                    )
+                    .unwrap();
+                }
+            } else if !old_line.is_empty() {
+                queue!(
+                    io::stdout(),
+                    cursor::MoveTo(
+                        corner_pos.x + ((inner_size.x - old_line_len as u16) / 2),
+                        corner_pos.y + index as u16,
+                    ),
+                    style::Print(Repeat(' ', old_line_len as u16)),
+                )
+                .unwrap();
+            }
+            index += 1;
+        }
+
+        for line in new_lines {
+            if !line.is_empty() {
+                queue!(
+                    io::stdout(),
+                    cursor::MoveTo(
+                        corner_pos.x + ((inner_size.x - line.chars().count() as u16) / 2),
+                        corner_pos.y + index as u16,
+                    ),
+                    style::Print(line),
+                )
+                .unwrap();
+            }
+            index += 1;
+        }
+    }
+
+    fn overwrite_text_right_align<'a>(
+        &self,
+        old_lines: impl Iterator<Item = Cow<'a, str>>,
+        new_lines: impl Iterator<Item = Cow<'a, str>>,
+    ) {
+        let inner_size = self.inner_size();
+        let corner_pos = {
+            let outer_pos = self.pos.map_x(|x| x + self.size.x);
+            if self.outline.is_some() {
+                Vec2::new(outer_pos.x - 1, outer_pos.y + 1)
+            } else {
+                outer_pos
+            }
+        };
+
+        let old_lines = old_lines.take(inner_size.y as usize);
+        let mut new_lines = new_lines.take(inner_size.y as usize);
+        let mut index = 0;
+
+        for old_line in old_lines {
+            let old_line_len = old_line.chars().count();
+            if let Some(new_line) = new_lines.next().filter(|l| !l.is_empty()) {
+                let new_line_len = new_line.chars().count();
+                if new_line_len >= old_line_len {
+                    queue!(
+                        io::stdout(),
+                        cursor::MoveTo(corner_pos.x - new_line_len as u16, corner_pos.y + index),
+                        style::Print(new_line),
+                    )
+                    .unwrap();
+                } else {
+                    queue!(
+                        io::stdout(),
+                        cursor::MoveTo(corner_pos.x - old_line_len as u16, corner_pos.y + index),
+                        style::Print(Repeat(' ', (old_line_len - new_line_len) as u16)),
+                        style::Print(new_line),
+                    )
+                    .unwrap();
+                }
+            } else {
+                queue!(
+                    io::stdout(),
+                    cursor::MoveTo(corner_pos.x - old_line_len as u16, corner_pos.y + index),
+                    style::Print(Repeat(' ', old_line_len as u16)),
+                )
+                .unwrap();
+            }
+            index += 1;
+        }
+        for line in new_lines {
+            if !line.is_empty() {
+                queue!(
+                    io::stdout(),
+                    cursor::MoveTo(
+                        corner_pos.x - line.chars().count() as u16,
+                        corner_pos.y + index as u16
+                    ),
+                    style::Print(line),
+                )
+                .unwrap();
+            }
+            index += 1;
         }
     }
 

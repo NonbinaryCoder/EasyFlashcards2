@@ -63,6 +63,12 @@ impl<T: Copy> Vec2<T> {
     }
 }
 
+impl<T: Into<usize> + Copy> Vec2<T> {
+    pub fn to_index_col_major(self, h: T) -> usize {
+        self.x.into() * h.into() + self.y.into()
+    }
+}
+
 impl Vec2<u16> {
     #[must_use]
     pub fn move_to(self) -> MoveTo {
