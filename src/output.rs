@@ -164,6 +164,7 @@ impl TextBox {
     /// Panics if size is not at least 5x3 (outlined) or at least 3x1 (no outline)
     pub fn draw_text(&self, text: &str) -> &Self {
         let lines_iter = self.get_lines_iter(text);
+        queue!(io::stdout(), style::SetForegroundColor(self.content_color)).unwrap();
 
         match self.text_align_h {
             TextAlignH::Left => self.draw_text_left_align(lines_iter),
@@ -315,6 +316,7 @@ impl TextBox {
     pub fn overwrite_text(&self, old_text: &str, new_text: &str) -> &Self {
         let old_lines = self.get_lines_iter(old_text);
         let new_lines = self.get_lines_iter(new_text);
+        queue!(io::stdout(), style::SetForegroundColor(self.content_color)).unwrap();
 
         match self.text_align_h {
             TextAlignH::Left => self.overwrite_text_left_align(old_lines, new_lines),
@@ -621,6 +623,15 @@ impl BoxOutline {
         br: '╝',
         h: '═',
         v: '║',
+    };
+
+    pub const ERASE: Self = Self {
+        tl: ' ',
+        tr: ' ',
+        bl: ' ',
+        br: ' ',
+        h: ' ',
+        v: ' ',
     };
 }
 

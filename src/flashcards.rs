@@ -7,6 +7,7 @@ use std::{
 };
 
 use crossterm::style::Color;
+use rand::seq::SliceRandom;
 use smallvec::{smallvec, SmallVec};
 
 use crate::output;
@@ -347,8 +348,8 @@ impl FlashcardText {
         self.0.push(val);
     }
 
-    pub fn first(&self) -> &str {
-        self.0.first().unwrap()
+    pub fn display(&self) -> &str {
+        self.0.choose(&mut rand::thread_rng()).unwrap()
     }
 }
 

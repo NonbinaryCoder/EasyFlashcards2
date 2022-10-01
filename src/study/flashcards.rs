@@ -1,22 +1,19 @@
-use std::{
-    io::{self, Write},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use argh::FromArgs;
 use crossterm::{
     event::{self, Event},
-    queue,
-    style::Attribute,
     terminal,
 };
 
 use crate::{
-    flashcards::{Flashcard, Set, Side},
+    flashcards::{Set, Side},
     load_set,
-    output::{BoxOutline, TerminalSettings, TextBox},
+    output::TerminalSettings,
     vec2::Vec2,
 };
+
+mod grid;
 
 #[derive(Debug, FromArgs)]
 #[argh(subcommand, name = "flashcards")]
@@ -33,206 +30,88 @@ pub struct Entry {
 impl Entry {
     pub fn run(self) {
         let set = load_set!(&self.set);
-        let mut cards = set
-            .cards
-            .into_iter()
-            .map(|card| (card, Side::Term))
-            .collect::<Vec<_>>();
+        let mut scroll_dst = 0u16;
 
         let card_count = self.card_count.unwrap_or_else(|| Vec2::splat(1));
-        let mut term_size: Vec2<_> = terminal::size()
+        let cards = set.cards;
+        let mut sides = vec![Side::Term; cards.len()];
+        let term_size: Vec2<_> = terminal::size()
             .expect("unable to get terminal size")
             .into();
-        let mut too_small = false;
-        let mut card_printer = TextBox::new();
-        card_printer.outline(Some(BoxOutline::HEAVY));
-        card_printer.text_align_h(crate::output::TextAlignH::Center);
-        card_printer.text_align_v(crate::output::TextAlignV::Center);
-        card_printer.size({
-            let mut card_size = term_size / card_count;
-            if card_size.x < 5 {
-                card_size.x = 5;
-                too_small = true;
-            }
-            if card_size.y < 3 {
-                card_size.y = 3;
-                too_small = true;
-            }
-            card_size
-        });
-        let mut offset = Vec2::splat(0);
-        let mut selected = Vec2::splat(0);
-        let mut start_x = 0;
-
-        let draw_all_cards = |start_x,
-                              selected,
-                              offset,
-                              count: Vec2<_>,
-                              cards: &mut Vec<(Flashcard, Side)>,
-                              card_printer: &mut TextBox| {
-            card_printer
-                .unset_attribute(Attribute::Bold)
-                .outline(Some(BoxOutline::HEAVY));
-            let mut pos = Vec2::splat(0);
-            for (card, side) in &cards[(start_x * card_count.y) as usize..] {
-                if pos == selected {
-                    card_printer
-                        .set_attribute(Attribute::Bold)
-                        .outline(Some(BoxOutline::DOUBLE));
-                }
-                card_printer
-                    .pos(pos * card_printer.size + offset)
-                    .color(side.color())
-                    .draw_outline_and_text(card[*side].first());
-                if pos == selected {
-                    card_printer
-                        .unset_attribute(Attribute::Bold)
-                        .outline(Some(BoxOutline::HEAVY));
-                }
-
-                pos.y += 1;
-                if pos.y >= count.y {
-                    pos.y = 0;
-                    pos.x += 1;
-                    if pos.x >= count.x {
-                        break;
-                    }
-                }
-            }
-        };
 
         let mut term_settings = TerminalSettings::new();
         term_settings
             .enter_alternate_screen()
             .hide_cursor()
             .enable_raw_mode();
-        if !too_small {
-            offset = (term_size - (card_count * *card_printer.get_size())) / Vec2::splat(2);
-            draw_all_cards(
-                start_x,
-                selected,
-                offset,
-                card_count,
-                &mut cards,
-                &mut card_printer,
-            );
-        }
-        io::stdout().flush().unwrap();
-        terminal::enable_raw_mode().unwrap();
+
+        let mut grid = grid::FlashcardGrid::new(card_count);
+        grid.fill_from_text(cards.iter().map(|card| card[Side::Term].display()))
+            .size_to(term_size);
 
         loop {
             match event::read().expect("Unable to read event") {
                 Event::Resize(x, y) => {
-                    term_size = Vec2::new(x, y);
-                    too_small = false;
-                    card_printer.size({
-                        let mut card_size = term_size / card_count;
-                        if card_size.x < 5 {
-                            card_size.x = 5;
-                            too_small = true;
-                        }
-                        if card_size.y < 3 {
-                            card_size.y = 3;
-                            too_small = true;
-                        }
-                        card_size
-                    });
-                    if !too_small {
-                        offset =
-                            (term_size - (card_count * *card_printer.get_size())) / Vec2::splat(2);
-                        queue!(io::stdout(), terminal::Clear(terminal::ClearType::All)).unwrap();
-                        draw_all_cards(
-                            start_x,
-                            selected,
-                            offset,
-                            card_count,
-                            &mut cards,
-                            &mut card_printer,
+                    grid.size_to(Vec2::new(x, y));
+                }
+                crate::up!() => grid.update(|grid| {
+                    if let Some(y) = grid.selected().y.checked_sub(1) {
+                        grid.set_selected(Vec2::new(grid.selected().x, y));
+                    } else if scroll_dst > 0 {
+                        scroll_dst -= 1;
+                        grid.fill_from_cards(
+                            cards
+                                .iter()
+                                .zip(sides.iter())
+                                .map(|(card, side)| (card[*side].display(), *side))
+                                .skip((scroll_dst * grid.card_count().x) as usize),
                         );
-                        io::stdout().flush().unwrap();
                     }
-                }
-                crate::up!() => {
-                    let new_y = selected.y.checked_sub(1);
-                    if let Some(new_y) = new_y {
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::HEAVY))
-                            .draw_outline();
-                        selected.y = new_y;
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::DOUBLE))
-                            .draw_outline();
-                        io::stdout().flush().unwrap();
-                    }
-                }
-                crate::down!() => {
-                    let new_selection = Vec2::new(selected.x, selected.y + 1);
-                    if new_selection.y < card_count.y
-                        && new_selection.to_index_col_major(card_count.y) < cards.len()
+                }),
+                crate::down!() => grid.update(|grid| {
+                    let new_selected = grid.selected() + Vec2::new(0, 1);
+                    if (new_selected + Vec2::new(0, scroll_dst))
+                        .index_row_major(grid.card_count().x as usize)
+                        < cards.len()
                     {
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::HEAVY))
-                            .draw_outline();
-                        selected = new_selection;
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::DOUBLE))
-                            .draw_outline();
-                        io::stdout().flush().unwrap();
+                        if new_selected.y < grid.card_count().y {
+                            grid.set_selected(new_selected);
+                        } else {
+                            scroll_dst += 1;
+                            grid.fill_from_cards(
+                                cards
+                                    .iter()
+                                    .zip(sides.iter())
+                                    .map(|(card, side)| (card[*side].display(), *side))
+                                    .skip((scroll_dst * grid.card_count().x) as usize),
+                            );
+                        }
                     }
-                }
-                crate::left!() => {
-                    let new_x = selected.x.checked_sub(1);
-                    if let Some(new_x) = new_x {
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::HEAVY))
-                            .draw_outline();
-                        selected.x = new_x;
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::DOUBLE))
-                            .draw_outline();
-                        io::stdout().flush().unwrap();
+                }),
+                crate::left!() => grid.update(|grid| {
+                    grid.selected_mut().x = grid.selected().x.saturating_sub(1);
+                }),
+                crate::right!() => grid.update(|grid| {
+                    let new_selected = grid.selected() + Vec2::new(1, 0);
+                    if (new_selected + Vec2::new(0, scroll_dst))
+                        .index_row_major(grid.card_count().x as usize)
+                        < cards.len()
+                        && new_selected.x < grid.card_count().x
+                    {
+                        grid.set_selected(new_selected);
                     }
-                }
-                crate::right!() => {
-                    let new_selection = Vec2::new(selected.x + 1, selected.y);
-                    let index = new_selection.to_index_col_major(card_count.y);
-                    if index < cards.len() {
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::HEAVY))
-                            .draw_outline();
-                        selected = new_selection;
-                        card_printer
-                            .pos(selected * card_printer.size + offset)
-                            .color(cards[selected.to_index_col_major(card_count.y)].1.color())
-                            .outline(Some(BoxOutline::DOUBLE))
-                            .draw_outline();
-                        io::stdout().flush().unwrap();
-                    }
-                }
+                }),
                 crate::click!() => {
-                    let (ref card, ref mut side) = cards[selected.to_index_col_major(card_count.y)];
-                    *side = !*side;
-                    card_printer
-                        .pos(selected * card_printer.size + offset)
-                        .color(side.color())
-                        .outline(Some(BoxOutline::DOUBLE))
-                        .draw_outline()
-                        .overwrite_text(card[!*side].first(), card[*side].first());
-                    io::stdout().flush().unwrap();
+                    grid.update(|grid| {
+                        let mut selected = grid.selected();
+                        let width = grid.card_count().x as usize;
+                        let card = (&mut grid[selected]).as_mut().unwrap();
+                        let new_side = !card.1;
+                        selected.y += scroll_dst;
+                        let index = selected.index_row_major(width);
+                        sides[index] = new_side;
+                        *card = (cards[index][new_side].display(), new_side);
+                    });
                 }
                 Event::Key(_) => break,
                 _ => {}
