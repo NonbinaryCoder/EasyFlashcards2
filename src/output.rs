@@ -14,6 +14,10 @@ pub fn write_fatal_error(text: &str) {
     println!("{}", text.dark_red());
 }
 
+pub fn len_base10_u16(v: u16) -> u16 {
+    ((v as f32).log10() + 1.0).floor() as u16
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Repeat(pub char, pub u16);
 
@@ -87,6 +91,11 @@ impl Drop for TerminalSettings {
         if self.raw_mode {
             let _ = terminal::disable_raw_mode();
         }
+        let _ = execute!(
+            io::stdout(),
+            style::SetForegroundColor(Color::Reset),
+            style::SetBackgroundColor(Color::Reset)
+        );
     }
 }
 

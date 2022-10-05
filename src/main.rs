@@ -19,11 +19,13 @@ struct EasyFlashCards {
 enum Subcommand {
     Debug(debug::Entry),
     Flashcards(study::flashcards::Entry),
+    Learn(study::learn::Entry),
 }
 
 fn main() {
     match argh::from_env::<EasyFlashCards>().subcommand {
         Subcommand::Debug(cmd) => cmd.run(),
         Subcommand::Flashcards(cmd) => cmd.run(),
+        Subcommand::Learn(cmd) => cmd.run(),
     }
 }

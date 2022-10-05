@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Display, Write},
+    fmt::{Debug, Display, Write},
     fs,
     ops::{Index, IndexMut, Not},
     path::Path,
@@ -97,9 +97,13 @@ impl FromStr for Set {
                     true
                 } else {
                     match line.split_once(':') {
-                        Some(("T", term)) => card[Side::Term].push(trim(term).to_owned()),
+                        Some(("T", term)) => card[Side::Term].push_display(trim(term).to_owned()),
                         Some(("D", definition)) => {
-                            card[Side::Definition].push(trim(definition).to_owned())
+                            card[Side::Definition].push_display(trim(definition).to_owned())
+                        }
+                        Some(("t", term)) => card[Side::Term].push_accepted(trim(term).to_owned()),
+                        Some(("d", definition)) => {
+                            card[Side::Definition].push_accepted(trim(definition).to_owned())
                         }
                         Some((tag, _)) => errors.push(ParseFlashcardItemError::UnknownTag {
                             tag: tag.to_owned(),
@@ -287,6 +291,12 @@ pub struct RecallSettings {
     text: bool,
 }
 
+impl RecallSettings {
+    pub fn is_used(&self) -> bool {
+        self.matching || self.text
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Flashcard {
     pub term: FlashcardText,
@@ -329,33 +339,65 @@ impl IndexMut<Side> for Flashcard {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FlashcardText(SmallVec<[String; 1]>);
+#[derive(Clone)]
+pub struct FlashcardText {
+    values: SmallVec<[String; 1]>,
+    num_display: usize,
+}
+
+impl Debug for FlashcardText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut p = f.debug_struct("FlashcardText");
+        p.field("displayable", &self.displayable());
+        let other_accepted = self.other_accepted();
+        if !other_accepted.is_empty() {
+            p.field("other_accepted", &other_accepted);
+        }
+        p.finish()
+    }
+}
 
 impl FlashcardText {
+    pub fn new(text: String) -> Self {
+        Self {
+            values: smallvec![text],
+            num_display: 0,
+        }
+    }
+
     const fn empty() -> Self {
-        FlashcardText(SmallVec::new_const())
+        FlashcardText {
+            values: SmallVec::new_const(),
+            num_display: 0,
+        }
     }
 
     /// Returns true if this is valid
     ///
     /// A flashcard text is valid if it has at least 1 value
     fn is_valid(&self) -> bool {
-        !self.0.is_empty()
+        !self.values.is_empty()
     }
 
-    pub fn push(&mut self, val: String) {
-        self.0.push(val);
+    pub fn push_display(&mut self, val: String) {
+        self.values.insert(self.num_display, val);
+        self.num_display += 1;
+    }
+
+    pub fn push_accepted(&mut self, val: String) {
+        self.values.push(val);
+    }
+
+    pub fn displayable(&self) -> &[String] {
+        &self.values[..self.num_display]
     }
 
     pub fn display(&self) -> &str {
-        self.0.choose(&mut rand::thread_rng()).unwrap()
+        self.displayable().choose(&mut rand::thread_rng()).unwrap()
     }
-}
 
-impl FlashcardText {
-    pub fn new(text: String) -> Self {
-        Self(smallvec![text])
+    pub fn other_accepted(&self) -> &[String] {
+        &self.values[self.num_display..]
     }
 }
 
@@ -373,7 +415,11 @@ impl From<&str> for FlashcardText {
 
 impl From<&[&str]> for FlashcardText {
     fn from(list: &[&str]) -> Self {
-        Self(list.iter().map(|&s| s.to_owned()).collect())
+        let values: SmallVec<_> = list.iter().map(|&s| s.to_owned()).collect();
+        Self {
+            num_display: values.len(),
+            values,
+        }
     }
 }
 
