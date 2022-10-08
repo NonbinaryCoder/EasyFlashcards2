@@ -285,10 +285,10 @@ macro_rules! load_set {
     };
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RecallSettings {
-    matching: bool,
-    text: bool,
+    pub matching: bool,
+    pub text: bool,
 }
 
 impl RecallSettings {

@@ -98,3 +98,13 @@ macro_rules! click {
         })
     };
 }
+
+#[macro_export]
+macro_rules! esc {
+    () => {
+        crossterm::event::Event::Key(crossterm::event::KeyEvent {
+            code: crossterm::event::KeyCode::Esc,
+            ..
+        })
+    };
+}

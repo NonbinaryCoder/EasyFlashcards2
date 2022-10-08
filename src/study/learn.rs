@@ -5,15 +5,19 @@ use std::{
 
 use argh::FromArgs;
 use crossterm::{
-    cursor, queue,
+    cursor,
+    event::{self, Event},
+    queue,
     style::{self, Color},
-    terminal,
+    terminal::{self, ClearType},
 };
+use rand::seq::SliceRandom;
+use text_box::{BoxOutline, TextBox};
 
 use crate::{
-    flashcards::{Flashcard, Set, Side},
+    flashcards::{Flashcard, FlashcardText, RecallSettings, Set, Side},
     load_set,
-    output::{len_base10_u16, Repeat, TerminalSettings},
+    output::{len_base10, text_box, MultiTextBox, Repeat, TerminalSettings},
     vec2::Vec2,
 };
 
@@ -36,29 +40,67 @@ const COLORS: [Color; 4] = [
 impl Entry {
     pub fn run(self) {
         let set = load_set!(&self.set);
-        let cards = CardList::from_set(&set);
-        let term_size: Vec2<_> = terminal::size()
+        let mut cards = CardList::from_set(&set);
+        let mut term_size: Vec2<_> = terminal::size()
             .expect("unable to get terminal size")
             .into();
         let mut term_settings = TerminalSettings::new();
-        term_settings.enter_alternate_screen().hide_cursor();
+        term_settings
+            .enter_alternate_screen()
+            .enable_raw_mode()
+            .hide_cursor();
+        let mut asker = Asker::new(term_size);
 
-        cards.print_footer(term_size);
-        io::stdout().flush().unwrap();
+        while let Some(card) = cards.get_unstudied() {
+            match card {
+                AskerData::Matching {
+                    question,
+                    answers,
+                    correct_answer,
+                } => {
+                    asker.draw_matching(question, answers);
+                    cards.print_footer(term_size);
+                    io::stdout().flush().unwrap();
+                    loop {
+                        match event::read().expect("Unable to read event") {
+                            crate::esc!() => panic!("Exited app"),
+                            Event::Resize(w, h) => {
+                                queue!(io::stdout(), terminal::Clear(ClearType::All)).unwrap();
+                                if w < 18 || h < 18 {
+                                    continue;
+                                }
+                                term_size = Vec2::new(w, h);
+                                asker.resize_to(term_size);
+                                asker.draw_matching(question, answers);
+                                cards.print_footer(term_size);
+                                io::stdout().flush().unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
         io::stdin().read_line(&mut String::new()).unwrap();
-
         drop(term_settings);
     }
 }
 
 #[derive(Debug)]
-struct CardList<'a>(Vec<CardListItem<'a>>);
+struct CardList<'a> {
+    cards: Vec<CardListItem<'a>>,
+    set: &'a Set,
+    recall_t: RecallSettings,
+    recall_d: RecallSettings,
+}
 
 #[derive(Debug)]
 struct CardListItem<'a> {
     card: &'a Flashcard,
     side: Side,
-    studied_state: StudiedState,
+    next_study_type: StudyType,
+    footer_color: u8,
 }
 
 impl<'a> CardList<'a> {
@@ -69,33 +111,43 @@ impl<'a> CardList<'a> {
             .count();
         let mut v = Vec::with_capacity(count * set.cards.len());
         if set.recall_t.is_used() {
+            let next_study_type = if set.recall_t.matching {
+                StudyType::Matching(0)
+            } else {
+                StudyType::Text(0)
+            };
             v.extend(set.cards.iter().map(|card| CardListItem {
                 card,
                 side: Side::Term,
-                studied_state: StudiedState::None,
+                next_study_type,
+                footer_color: 0,
             }));
         }
         if set.recall_d.is_used() {
+            let next_study_type = if set.recall_t.matching {
+                StudyType::Matching(0)
+            } else {
+                StudyType::Text(0)
+            };
             v.extend(set.cards.iter().map(|card| CardListItem {
                 card,
                 side: Side::Definition,
-                studied_state: StudiedState::None,
+                next_study_type,
+                footer_color: 0,
             }));
         }
-        Self(v)
+        Self {
+            cards: v,
+            set,
+            recall_t: set.recall_t,
+            recall_d: set.recall_d,
+        }
     }
 
     fn print_footer(&self, term_size: Vec2<u16>) {
         let mut counts = [0; COLORS.len()];
-        for item in self.0.iter() {
-            use StudiedState::*;
-            counts[match item.studied_state {
-                None => 0,
-                MatchedOnce => 1,
-                MatchedTwice => 2,
-                SpelledOnce => 2,
-                Learned => 3,
-            }] += 1;
+        for item in self.cards.iter() {
+            counts[item.footer_color as usize] += 1;
         }
 
         let sum = counts.iter().sum::<u16>() as f32;
@@ -105,7 +157,7 @@ impl<'a> CardList<'a> {
 
         queue!(io::stdout(), cursor::MoveTo(0, term_size.y - 1)).unwrap();
         for ((count, width), color) in counts.into_iter().zip(widths).zip(COLORS).rev() {
-            let len_base10_u16 = len_base10_u16(count);
+            let len_base10_u16 = len_base10(count);
             if count > 0 && len_base10_u16 <= width {
                 let remaining_len = width - len_base10_u16;
                 let before_len = remaining_len / 2;
@@ -127,15 +179,98 @@ impl<'a> CardList<'a> {
                 .unwrap();
             }
         }
-        queue!(io::stdout(), style::SetForegroundColor(Color::Reset)).unwrap();
+        queue!(io::stdout(), style::SetBackgroundColor(Color::Reset)).unwrap();
+    }
+
+    fn get_unstudied(&self) -> Option<AskerData> {
+        let mut rng = rand::thread_rng();
+        self.cards
+            .choose(&mut rng)
+            .map(|card| match card.next_study_type {
+                StudyType::Matching(_) => {
+                    let correct_answer = &card.card[!card.side];
+                    AskerData::Matching {
+                        question: card.card[card.side].display(),
+                        answers: [
+                            self.set.cards.choose(&mut rng).unwrap()[!card.side].display(),
+                            self.set.cards.choose(&mut rng).unwrap()[!card.side].display(),
+                            self.set.cards.choose(&mut rng).unwrap()[!card.side].display(),
+                            correct_answer.display(),
+                        ],
+                        correct_answer,
+                    }
+                }
+                StudyType::Text(_) => todo!(),
+            })
+    }
+
+    fn recall_settings(&self, side: Side) -> RecallSettings {
+        match side {
+            Side::Term => self.recall_t,
+            Side::Definition => self.recall_d,
+        }
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum StudiedState {
-    None,
-    MatchedOnce,
-    MatchedTwice,
-    SpelledOnce,
-    Learned,
+#[derive(Debug)]
+struct Asker {
+    question_box: TextBox,
+    matching_answers_box: MultiTextBox,
+}
+
+impl Asker {
+    fn new(term_size: Vec2<u16>) -> Self {
+        let mut this = Self {
+            question_box: TextBox::new(),
+            matching_answers_box: MultiTextBox::new(),
+        };
+        this.question_box.outline(Some(BoxOutline::DOUBLE)).y(2);
+        this.matching_answers_box
+            .box_count(Vec2::new(4, 1))
+            .number(true);
+        this.resize_to(term_size);
+        this
+    }
+
+    fn resize_to(&mut self, term_size: Vec2<u16>) -> &mut Self {
+        let inner_y = term_size.y - 7;
+        let box_height = inner_y / 2;
+        self.question_box
+            .width(term_size.x / 3)
+            .x(term_size.x / 3)
+            .height(box_height);
+        self.matching_answers_box
+            .width(term_size.x)
+            .height(box_height)
+            .y(term_size.y - 3 - box_height);
+        self
+    }
+
+    pub fn draw_matching(&self, question: &str, answers: [&str; 4]) -> &Self {
+        self.question_box.draw_outline_and_text(question);
+        self.matching_answers_box.draw_outline().draw_text(answers);
+        self
+    }
+}
+
+#[derive(Debug)]
+enum AskerData<'a> {
+    /// Layout:
+    /// 2 lines blank
+    /// 1/2 question box
+    /// 2+ lines blank
+    /// 1/2 answers box
+    /// 2 lines blank
+    /// 1 line footer
+    Matching {
+        question: &'a str,
+        answers: [&'a str; 4],
+        correct_answer: &'a FlashcardText,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+enum StudyType {
+    Matching(u8),
+    Text(u8),
 }
