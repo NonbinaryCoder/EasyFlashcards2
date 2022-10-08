@@ -66,7 +66,7 @@ impl Entry {
                             crate::esc!() => panic!("Exited app"),
                             Event::Resize(w, h) => {
                                 queue!(io::stdout(), terminal::Clear(ClearType::All)).unwrap();
-                                if w < 18 || h < 18 {
+                                if w < 24 || h < 24 {
                                     continue;
                                 }
                                 term_size = Vec2::new(w, h);
@@ -226,6 +226,7 @@ impl Asker {
         };
         this.question_box.outline(Some(BoxOutline::DOUBLE)).y(2);
         this.matching_answers_box
+            .x(4)
             .box_count(Vec2::new(4, 1))
             .number(true);
         this.resize_to(term_size);
@@ -240,7 +241,7 @@ impl Asker {
             .x(term_size.x / 3)
             .height(box_height);
         self.matching_answers_box
-            .width(term_size.x)
+            .width(term_size.x - 8)
             .height(box_height)
             .y(term_size.y - 3 - box_height);
         self
