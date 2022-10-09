@@ -17,7 +17,7 @@ use text_box::{BoxOutline, TextBox};
 use crate::{
     flashcards::{Flashcard, FlashcardText, RecallSettings, Set, Side},
     load_set,
-    output::{len_base10, text_box, MultiTextBox, Repeat, TerminalSettings},
+    output::{self, len_base10, text_box, MultiTextBox, Repeat, TerminalSettings},
     vec2::Vec2,
 };
 
@@ -40,6 +40,10 @@ const COLORS: [Color; 4] = [
 impl Entry {
     pub fn run(self) {
         let set = load_set!(&self.set);
+        if set.cards.is_empty() {
+            output::write_fatal_error("Set must have at least 1 card to learn");
+            return;
+        }
         let mut cards = CardList::from_set(&set);
         let mut term_size: Vec2<_> = terminal::size()
             .expect("unable to get terminal size")
@@ -91,8 +95,6 @@ impl Entry {
 struct CardList<'a> {
     cards: Vec<CardListItem<'a>>,
     set: &'a Set,
-    recall_t: RecallSettings,
-    recall_d: RecallSettings,
 }
 
 #[derive(Debug)]
@@ -136,12 +138,7 @@ impl<'a> CardList<'a> {
                 footer_color: 0,
             }));
         }
-        Self {
-            cards: v,
-            set,
-            recall_t: set.recall_t,
-            recall_d: set.recall_d,
-        }
+        Self { cards: v, set }
     }
 
     fn print_footer(&self, term_size: Vec2<u16>) {
@@ -189,14 +186,21 @@ impl<'a> CardList<'a> {
             .map(|card| match card.next_study_type {
                 StudyType::Matching(_) => {
                     let correct_answer = &card.card[!card.side];
+                    let mut answers = [""; 4];
+                    answers[0] = correct_answer.display();
+                    for i in 1..4 {
+                        for _ in 0..12 {
+                            answers[i] =
+                                self.set.cards.choose(&mut rng).unwrap()[!card.side].display();
+                            if !answers[..i].contains(&answers[i]) {
+                                break;
+                            }
+                        }
+                    }
+                    answers.shuffle(&mut rng);
                     AskerData::Matching {
                         question: card.card[card.side].display(),
-                        answers: [
-                            self.set.cards.choose(&mut rng).unwrap()[!card.side].display(),
-                            self.set.cards.choose(&mut rng).unwrap()[!card.side].display(),
-                            self.set.cards.choose(&mut rng).unwrap()[!card.side].display(),
-                            correct_answer.display(),
-                        ],
+                        answers,
                         correct_answer,
                     }
                 }
@@ -206,8 +210,8 @@ impl<'a> CardList<'a> {
 
     fn recall_settings(&self, side: Side) -> RecallSettings {
         match side {
-            Side::Term => self.recall_t,
-            Side::Definition => self.recall_d,
+            Side::Term => self.set.recall_t,
+            Side::Definition => self.set.recall_d,
         }
     }
 }
