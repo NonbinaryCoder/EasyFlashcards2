@@ -120,20 +120,20 @@ impl<'a> CardList<'a> {
             };
             v.extend(set.cards.iter().map(|card| CardListItem {
                 card,
-                side: Side::Term,
+                side: Side::Definition,
                 next_study_type,
                 footer_color: 0,
             }));
         }
         if set.recall_d.is_used() {
-            let next_study_type = if set.recall_t.matching {
+            let next_study_type = if set.recall_d.matching {
                 StudyType::Matching(0)
             } else {
                 StudyType::Text(0)
             };
             v.extend(set.cards.iter().map(|card| CardListItem {
                 card,
-                side: Side::Definition,
+                side: Side::Term,
                 next_study_type,
                 footer_color: 0,
             }));
