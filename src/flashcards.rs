@@ -3,6 +3,7 @@ use std::{
     fs,
     ops::{Index, IndexMut, Not},
     path::Path,
+    rc::Rc,
     str::FromStr,
 };
 
@@ -97,9 +98,13 @@ impl FromStr for Set {
                     true
                 } else {
                     match line.split_once(':') {
-                        Some(("T", term)) => card[Side::Term].push(trim(term).to_owned()),
+                        Some(("T", term)) => card[Side::Term].push_display(trim(term)),
                         Some(("D", definition)) => {
-                            card[Side::Definition].push(trim(definition).to_owned())
+                            card[Side::Definition].push_display(trim(definition))
+                        }
+                        Some(("t", term)) => card[Side::Term].push_accepted(trim(term)),
+                        Some(("d", definition)) => {
+                            card[Side::Definition].push_accepted(trim(definition))
                         }
                         Some((tag, _)) => errors.push(ParseFlashcardItemError::UnknownTag {
                             tag: tag.to_owned(),
@@ -330,32 +335,61 @@ impl IndexMut<Side> for Flashcard {
 }
 
 #[derive(Debug, Clone)]
-pub struct FlashcardText(SmallVec<[String; 1]>);
+pub struct FlashcardText {
+    vals: SmallVec<[Rc<str>; 1]>,
+    num_display: u8,
+}
 
 impl FlashcardText {
     const fn empty() -> Self {
-        FlashcardText(SmallVec::new_const())
+        FlashcardText {
+            vals: SmallVec::new_const(),
+            num_display: 0,
+        }
     }
 
     /// Returns true if this is valid
     ///
     /// A flashcard text is valid if it has at least 1 value
     fn is_valid(&self) -> bool {
-        !self.0.is_empty()
+        self.num_display > 0
     }
 
-    pub fn push(&mut self, val: String) {
-        self.0.push(val);
+    pub fn display_options(&self) -> &[Rc<str>] {
+        &self.vals[..self.num_display as usize]
     }
 
-    pub fn display(&self) -> &str {
-        self.0.choose(&mut rand::thread_rng()).unwrap()
+    pub fn push_display(&mut self, val: impl Into<Rc<str>>) {
+        self.vals.push(val.into());
+        self.num_display = self
+            .num_display
+            .checked_add(1)
+            .expect("Flaschards cannot have more than 255 values!");
+    }
+
+    pub fn push_accepted(&mut self, val: impl Into<Rc<str>>) {
+        self.vals.push(val.into());
+    }
+
+    pub fn display(&self) -> &Rc<str> {
+        self.display_options()
+            .choose(&mut rand::thread_rng())
+            .unwrap()
     }
 }
 
 impl FlashcardText {
-    pub fn new(text: String) -> Self {
-        Self(smallvec![text])
+    pub fn new(text: impl Into<Rc<str>>) -> Self {
+        Self {
+            vals: smallvec![text.into()],
+            num_display: 0,
+        }
+    }
+}
+
+impl From<Rc<str>> for FlashcardText {
+    fn from(s: Rc<str>) -> Self {
+        Self::new(s)
     }
 }
 
@@ -367,13 +401,7 @@ impl From<String> for FlashcardText {
 
 impl From<&str> for FlashcardText {
     fn from(s: &str) -> Self {
-        Self::new(s.to_owned())
-    }
-}
-
-impl From<&[&str]> for FlashcardText {
-    fn from(list: &[&str]) -> Self {
-        Self(list.iter().map(|&s| s.to_owned()).collect())
+        Self::new(s)
     }
 }
 

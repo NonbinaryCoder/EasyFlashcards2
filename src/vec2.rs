@@ -1,6 +1,6 @@
 use std::{
     array,
-    ops::{Add, AddAssign, Div, Mul, Sub},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
 use crossterm::cursor::MoveTo;
@@ -70,12 +70,26 @@ impl<T: Copy + Into<usize>> Vec2<T> {
     }
 }
 
+#[allow(dead_code)]
 impl Vec2<u16> {
     pub const ZERO: Vec2<u16> = Vec2::new(0, 0);
+    pub const ONE: Vec2<u16> = Vec2::new(1, 1);
+    pub const X: Vec2<u16> = Vec2::new(1, 0);
+    pub const Y: Vec2<u16> = Vec2::new(0, 1);
 
     #[must_use]
     pub fn move_to(self) -> MoveTo {
         MoveTo(self.x, self.y)
+    }
+
+    #[must_use]
+    pub fn x(x: u16) -> Self {
+        Self { x, y: 0 }
+    }
+
+    #[must_use]
+    pub fn y(y: u16) -> Self {
+        Self { x: 0, y }
     }
 }
 
@@ -126,62 +140,45 @@ impl<T: Copy + Div<U, Output = O>, U: Copy, O: Copy> Div<Vec2<U>> for Vec2<T> {
     }
 }
 
-pub trait DefaultStep {
-    fn default_step() -> Self;
-}
-
-impl DefaultStep for u16 {
-    fn default_step() -> Self {
-        1
+impl<T: Copy + AddAssign<U>, U: Copy> AddAssign<Vec2<U>> for Vec2<T> {
+    fn add_assign(&mut self, rhs: Vec2<U>) {
+        self.x += rhs.x;
+        self.y += rhs.y;
     }
 }
 
-impl<T: Copy + AddAssign<T> + PartialOrd<T> + DefaultStep> Vec2<T> {
-    /// Returns an iterator over the positions between `self` and `other`.
-    /// Inclusive of `self`, exclusive of `other`
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self.x` > `other.x` or `self.y` > `other.y`
-    pub fn positions_between(self, other: Vec2<T>) -> PositionsIter<T> {
-        PositionsIter {
-            start_x: self.x,
-            next: Some(self).filter(|_| self.x < other.x && self.y < other.y),
-            end: other,
-            step: T::default_step(),
-        }
+impl<T: Copy + SubAssign<U>, U: Copy> SubAssign<Vec2<U>> for Vec2<T> {
+    fn sub_assign(&mut self, rhs: Vec2<U>) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PositionsIter<T: Copy + AddAssign<T> + PartialOrd<T>> {
-    start_x: T,
-    next: Option<Vec2<T>>,
-    end: Vec2<T>,
-    step: T,
+impl<T: Copy + MulAssign<U>, U: Copy> MulAssign<Vec2<U>> for Vec2<T> {
+    fn mul_assign(&mut self, rhs: Vec2<U>) {
+        self.x *= rhs.x;
+        self.y *= rhs.y;
+    }
 }
 
-impl<T: Copy + AddAssign<T> + PartialOrd> Iterator for PositionsIter<T> {
-    type Item = Vec2<T>;
+impl<T: Copy + DivAssign<U>, U: Copy> DivAssign<Vec2<U>> for Vec2<T> {
+    fn div_assign(&mut self, rhs: Vec2<U>) {
+        self.x /= rhs.x;
+        self.y /= rhs.y;
+    }
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let ret = self.next;
-        self.next = if let Some(mut last) = self.next {
-            last.x += self.step;
-            if last.x < self.end.x {
-                Some(last)
-            } else {
-                last.y += self.step;
-                if last.y < self.end.y {
-                    last.x = self.start_x;
-                    Some(last)
-                } else {
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        ret
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Rect<T: Copy> {
+    pub pos: Vec2<T>,
+    pub size: Vec2<T>,
+}
+
+impl<T: Copy + AddAssign + SubAssign> Rect<T> {
+    pub fn shrink_centered(mut self, factor: Vec2<T>) -> Rect<T> {
+        self.pos += factor;
+        self.size -= factor;
+        self.size -= factor;
+        self
     }
 }
