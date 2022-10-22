@@ -1,6 +1,10 @@
 use std::{fmt::Display, io};
 
-use crossterm::{cursor, execute, queue, style::Stylize, terminal};
+use crossterm::{
+    cursor, execute, queue,
+    style::{self, Color, Stylize},
+    terminal,
+};
 
 pub mod text_box;
 pub mod word_wrap;
@@ -90,6 +94,7 @@ impl Drop for TerminalSettings {
         if self.raw_mode {
             let _ = terminal::disable_raw_mode();
         }
+        let _ = execute!(io::stdout(), style::SetForegroundColor(Color::Reset));
     }
 }
 

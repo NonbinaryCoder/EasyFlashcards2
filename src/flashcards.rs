@@ -288,8 +288,15 @@ macro_rules! load_set {
 
 #[derive(Debug, Default, Clone)]
 pub struct RecallSettings {
-    matching: bool,
-    text: bool,
+    pub matching: bool,
+    pub text: bool,
+}
+
+impl RecallSettings {
+    /// Returns true if this uses matching or text
+    pub fn is_used(&self) -> bool {
+        self.matching || self.text
+    }
 }
 
 #[derive(Debug, Clone)]
