@@ -1,10 +1,11 @@
 use std::{
+    char::ToLowercase,
     fmt::{Display, Write},
     fs,
     ops::{Index, IndexMut, Not},
     path::Path,
     rc::Rc,
-    str::FromStr,
+    str::{Chars, FromStr},
 };
 
 use crossterm::style::Color;
@@ -40,6 +41,13 @@ impl Set {
                 output::write_fatal_error(&format!("Unable to open set: {err}"));
                 None
             }
+        }
+    }
+
+    pub fn recall_settings(&self, side: Side) -> &RecallSettings {
+        match side {
+            Side::Term => &self.recall_t,
+            Side::Definition => &self.recall_d,
         }
     }
 }
@@ -371,7 +379,7 @@ impl FlashcardText {
         self.num_display = self
             .num_display
             .checked_add(1)
-            .expect("Flaschards cannot have more than 255 values!");
+            .expect("Flascards cannot have more than 255 values!");
     }
 
     pub fn push_accepted(&mut self, val: impl Into<Rc<str>>) {
@@ -382,6 +390,37 @@ impl FlashcardText {
         self.display_options()
             .choose(&mut rand::thread_rng())
             .unwrap()
+    }
+
+    pub fn contains(&self, val: &str, settings: &RecallSettings) -> bool {
+        fn eq_with_settings(pat: &str, val: &str, settings: &RecallSettings) -> bool {
+            struct Iter<'a> {
+                chars_iter: Chars<'a>,
+                #[allow(dead_code)]
+                settings: &'a RecallSettings,
+            }
+            impl<'a> Iterator for Iter<'a> {
+                type Item = char;
+
+                fn next(&mut self) -> Option<Self::Item> {
+                    self.chars_iter
+                        .by_ref()
+                        .find(|c| !c.is_ascii_whitespace())
+                        .map(|c| c.to_ascii_lowercase())
+                }
+            }
+            Iter {
+                chars_iter: pat.chars(),
+                settings,
+            }
+            .eq(Iter {
+                chars_iter: val.chars(),
+                settings,
+            })
+        }
+        self.vals
+            .iter()
+            .any(|pat| eq_with_settings(pat, val, settings))
     }
 }
 

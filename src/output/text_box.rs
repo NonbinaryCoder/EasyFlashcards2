@@ -527,20 +527,12 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
                 };
                 match (item.text.as_ref(), new_text) {
                     (None, None) => {}
-                    (None, Some(new_text)) => {
-                        draw_text(dims, item.color, new_text.as_ref(), item.align);
-                        item.text = Some(new_text);
+                    (None, Some(text)) => {
+                        draw_text(dims, item.color, text.as_ref(), item.align);
+                        item.text = Some(text);
                     }
-                    (Some(old_text), None) => {
-                        overwrite_text(
-                            dims,
-                            item.color,
-                            old_text.as_ref(),
-                            item.align,
-                            "",
-                            TextAlign::new(TextAlignH::Left, TextAlignV::Top),
-                        );
-                        item.text = None;
+                    (Some(text), None) => {
+                        draw_text(dims, item.color, text.as_ref(), item.align);
                     }
                     (Some(old_text), Some(new_text)) => {
                         overwrite_text(
@@ -694,6 +686,11 @@ impl<'a, S: AsRef<str>> MultiTextBoxItemUpdater<'a, S> {
             None => self.changes.redraw = true,
         }
         self.changes.new_text = Some(text);
+        self
+    }
+
+    pub fn set_color(&mut self, color: Color) -> &mut Self {
+        self.changes.redraw |= !set_and_compare(&mut self.item.color, color);
         self
     }
 }

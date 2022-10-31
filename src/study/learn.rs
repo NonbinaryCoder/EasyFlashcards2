@@ -8,6 +8,7 @@ use argh::FromArgs;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     queue,
+    style::Color,
     terminal::{self, ClearType},
 };
 use rand::{seq::SliceRandom, Rng};
@@ -72,7 +73,7 @@ impl Entry {
             })
         }
 
-        while cards.select_next() {
+        'study_loop: while cards.select_next() {
             let &CardListItem {
                 card,
                 side,
@@ -80,31 +81,30 @@ impl Entry {
             } = cards.selected();
             match next_study_type {
                 StudyType::Matching(studied_before) => {
+                    let mut answers: [_; 4] = array::from_fn(|_| None);
+                    answers[0] = Some(card[!side].display().clone());
+                    for i in 1..4 {
+                        for _ in 0..12 {
+                            answers[i] = Some(
+                                set.cards.choose(&mut rand::thread_rng()).unwrap()[!side]
+                                    .display()
+                                    .clone(),
+                            );
+                            if !answers[..i].contains(&answers[i]) {
+                                break;
+                            }
+                        }
+                    }
+                    let mut answers = answers.map(Option::unwrap);
+                    answers.shuffle(&mut rand::thread_rng());
+
                     question_box.update(|updater| {
                         updater.set_text(card[side].display().clone());
                     });
                     matching_answers_boxes.update(|updater| {
                         updater.set_outline(MultiOutlineType::DOUBLE_LIGHT);
-
-                        let mut answers: [_; 4] = array::from_fn(|_| None);
-                        answers[0] = Some(card[!side].display().clone());
-                        for i in 1..4 {
-                            for _ in 0..12 {
-                                answers[i] = Some(
-                                    set.cards.choose(&mut rand::thread_rng()).unwrap()[!side]
-                                        .display()
-                                        .clone(),
-                                );
-                                if !answers[..i].contains(&answers[i]) {
-                                    break;
-                                }
-                            }
-                        }
-                        let mut answers = answers.map(Option::unwrap);
-                        answers.shuffle(&mut rand::thread_rng());
-
-                        for (index, text) in answers.into_iter().enumerate() {
-                            updater.text(index).set(text);
+                        for (index, text) in answers.iter().cloned().enumerate() {
+                            updater.text(index).set(text).set_color(Color::White);
                         }
                     });
                     io::stdout().flush().unwrap();
@@ -119,9 +119,7 @@ impl Entry {
                                 panic!("Exited with ctrl-c");
                             }
                             Event::Resize(x, y) => {
-                                let term_size: Vec2<_> = terminal::size()
-                                    .expect("unable to get terminal size")
-                                    .into();
+                                let term_size = Vec2::new(x, y);
                                 let height_minus_padding = term_size.y.saturating_sub(7);
                                 let box_height = height_minus_padding / 2;
 
@@ -141,6 +139,38 @@ impl Entry {
                                 });
 
                                 io::stdout().flush().unwrap();
+                            }
+                            Event::Key(KeyEvent {
+                                code: KeyCode::Char(c),
+                                ..
+                            }) if ('1'..='4').contains(&c) => {
+                                let index = match c {
+                                    '1' => 0,
+                                    '2' => 1,
+                                    '3' => 2,
+                                    '4' => 3,
+                                    _ => unreachable!(),
+                                };
+
+                                if card[!side]
+                                    .contains(&answers[index], cards.set.recall_settings(side))
+                                {
+                                    matching_answers_boxes.update(|updater| {
+                                        updater.text(index).set_color(Color::Green);
+                                    });
+                                    io::stdout().flush().unwrap();
+                                    loop {
+                                        if let Event::Key(_) = event::read().unwrap() {
+                                            break;
+                                        }
+                                    }
+                                    continue 'study_loop;
+                                } else {
+                                    matching_answers_boxes.update(|updater| {
+                                        updater.text(index).set_color(Color::Red);
+                                    });
+                                    io::stdout().flush().unwrap();
+                                }
                             }
                             _ => break,
                         }
