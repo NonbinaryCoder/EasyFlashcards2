@@ -1,5 +1,4 @@
 use std::{
-    char::ToLowercase,
     fmt::{Display, Write},
     fs,
     ops::{Index, IndexMut, Not},
@@ -294,17 +293,11 @@ macro_rules! load_set {
     };
 }
 
+// NOT `Copy` because non-Copy fields may be added in the future
 #[derive(Debug, Default, Clone)]
 pub struct RecallSettings {
     pub matching: bool,
     pub text: bool,
-}
-
-impl RecallSettings {
-    /// Returns true if this uses matching or text
-    pub fn is_used(&self) -> bool {
-        self.matching || self.text
-    }
 }
 
 #[derive(Debug, Clone)]

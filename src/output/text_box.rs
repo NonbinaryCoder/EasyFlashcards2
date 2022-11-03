@@ -78,10 +78,10 @@ impl<S: AsRef<str>> TextBox<S> {
                     draw_text(
                         self.inner_size(),
                         self.text_color,
-                        new_text.as_ref(),
+                        new_text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
                         self.text_align,
                     );
-                    self.text = Some(new_text);
+                    self.text = new_text;
                 }
                 (Some(old_text), None) => {
                     overwrite_text(
@@ -100,10 +100,10 @@ impl<S: AsRef<str>> TextBox<S> {
                         self.text_color,
                         old_text.as_ref(),
                         self.text_align,
-                        new_text.as_ref(),
+                        new_text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
                         new_text_align,
                     );
-                    self.text = Some(new_text);
+                    self.text = new_text;
                 }
             }
             self.text_align = new_text_align;
@@ -310,7 +310,7 @@ fn overwrite_text(
 #[derive(Debug)]
 pub struct TextBoxUpdater<'a, S: AsRef<str>> {
     inner: &'a mut TextBox<S>,
-    new_text: Option<S>,
+    new_text: Option<Option<S>>,
     new_text_align: TextAlign,
     redraw_text: bool,
     redraw_outline: bool,
@@ -322,12 +322,12 @@ impl<'a, S: AsRef<str>> TextBoxUpdater<'a, S> {
             Some(old_text) => self.redraw_text |= old_text.as_ref() != text.as_ref(),
             None => self.redraw_text = true,
         }
-        self.new_text = Some(text);
+        self.new_text = Some(Some(text));
         self
     }
 
     pub fn clear_text(&mut self) -> &mut Self {
-        self.new_text = None;
+        self.new_text = Some(None);
         self.redraw_text |= self.inner.text.is_some();
         self
     }
@@ -528,8 +528,13 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
                 match (item.text.as_ref(), new_text) {
                     (None, None) => {}
                     (None, Some(text)) => {
-                        draw_text(dims, item.color, text.as_ref(), item.align);
-                        item.text = Some(text);
+                        draw_text(
+                            dims,
+                            item.color,
+                            text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
+                            item.align,
+                        );
+                        item.text = text;
                     }
                     (Some(text), None) => {
                         draw_text(dims, item.color, text.as_ref(), item.align);
@@ -540,10 +545,10 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
                             item.color,
                             old_text.as_ref(),
                             item.align,
-                            new_text.as_ref(),
+                            new_text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
                             new_align,
                         );
-                        item.text = Some(new_text);
+                        item.text = new_text;
                     }
                 }
                 item.align = new_align;
@@ -580,6 +585,10 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
             };
             selected_pos.x += self.item_size.x + 1;
         }
+    }
+
+    pub fn text(&self, index: usize) -> Option<&S> {
+        self.items[index].text.as_ref()
     }
 }
 
@@ -654,7 +663,7 @@ pub struct MultiTextBoxUpdater<'a, S: AsRef<str>, const ITEMS: usize> {
 
 #[derive(Debug)]
 pub struct MultiTextBoxItemChanges<S: AsRef<str>> {
-    new_text: Option<S>,
+    new_text: Option<Option<S>>,
     new_align: TextAlign,
     redraw: bool,
 }
@@ -685,7 +694,7 @@ impl<'a, S: AsRef<str>> MultiTextBoxItemUpdater<'a, S> {
             Some(old_text) => self.changes.redraw |= old_text.as_ref() != text.as_ref(),
             None => self.changes.redraw = true,
         }
-        self.changes.new_text = Some(text);
+        self.changes.new_text = Some(Some(text));
         self
     }
 
