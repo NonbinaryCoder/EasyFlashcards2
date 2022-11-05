@@ -12,7 +12,10 @@ use crossterm::{
 
 use crate::{
     flashcards::Set,
-    output::text_box::{MultiOutlineType, MultiTextBox, OutlineType, TextBox},
+    output::{
+        text_box::{input::TextInput, MultiOutlineType, MultiTextBox, OutlineType, TextBox},
+        TerminalSettings,
+    },
     vec2::{Rect, Vec2},
 };
 
@@ -28,8 +31,10 @@ mod footer;
 pub struct World<'a> {
     question_box: TextBox<Rc<str>>,
     matching_answers_boxes: MultiTextBox<Rc<str>, 4>,
+    text_input: TextInput,
     footer: Footer,
     card_list: CardList<'a>,
+    term_settings: &'a mut TerminalSettings,
     typ: Option<WorldType>,
 }
 
@@ -39,16 +44,20 @@ enum WorldType {
         studying: card_list::Token,
         failed: bool,
     },
+    Text {
+        studying: card_list::Token,
+    },
     WaitingForKeypress,
 }
 
 impl<'a> World<'a> {
     #[must_use]
-    pub fn new(size: Vec2<u16>, set: &'a Set) -> Self {
+    pub fn new(size: Vec2<u16>, set: &'a Set, term_settings: &'a mut TerminalSettings) -> Self {
         let card_list = CardList::from_set(set);
 
         let height_minus_padding = size.y.saturating_sub(7);
         let box_height = height_minus_padding / 2;
+        let bottom_box_y = size.y.saturating_sub(box_height).saturating_sub(3);
 
         let mut this = World {
             question_box: TextBox::from_fn(
@@ -62,10 +71,15 @@ impl<'a> World<'a> {
             ),
             matching_answers_boxes: MultiTextBox::new(Rect {
                 size: Vec2::new(size.x.saturating_sub(8), box_height),
-                pos: Vec2::new(4, size.y.saturating_sub(box_height).saturating_sub(3)),
+                pos: Vec2::new(4, bottom_box_y),
+            }),
+            text_input: TextInput::new(Rect {
+                size: Vec2::new(size.x / 3, box_height),
+                pos: Vec2::new(size.x / 3, bottom_box_y),
             }),
             footer: Footer::new(card_list.len() as u32, size),
             card_list,
+            term_settings,
             typ: None,
         };
 
@@ -94,13 +108,23 @@ impl<'a> World<'a> {
                             }
                             updater.set_outline(MultiOutlineType::DOUBLE_LIGHT);
                         });
+                        self.text_input.hide();
 
                         self.typ = Some(WorldType::Matching {
                             studying: token,
                             failed: false,
                         });
                     }
-                    StudyType::Text(_) => todo!(),
+                    StudyType::Text(_) => {
+                        self.question_box.update(|updater| {
+                            updater.set_text(item.card[!item.side].display().clone());
+                        });
+                        self.matching_answers_boxes.hide();
+                        self.text_input.set_outline(OutlineType::DOUBLE);
+                        io::stdout().flush().unwrap();
+
+                        let answer = self.text_input.get_input(self.term_settings);
+                    }
                 }
                 true
             }
@@ -174,6 +198,10 @@ impl<'a> World<'a> {
                     io::stdout().flush().unwrap();
                 }
                 ControlFlow::Continue(())
+            }
+            Some(WorldType::Text { studying }) => {
+                self.text_input.get_input(self.term_settings);
+                ControlFlow::Break(())
             }
             Some(WorldType::WaitingForKeypress) => match self.study_next() {
                 true => ControlFlow::Continue(()),

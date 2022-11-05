@@ -45,6 +45,7 @@ impl Entry {
                 .expect("unable to get terminal size")
                 .into(),
             &set,
+            &mut term_settings,
         );
 
         loop {

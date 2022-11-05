@@ -13,6 +13,22 @@ pub fn write_fatal_error(text: &str) {
     println!("{}", text.dark_red());
 }
 
+pub fn floor_char_boundary(s: &str, mut pos: usize) -> usize {
+    while !s.is_char_boundary(pos) {
+        pos -= 1;
+    }
+    pos
+}
+
+pub fn ceil_char_boundary(s: &str, mut pos: usize) -> Option<usize> {
+    (pos <= s.len()).then(|| {
+        while !s.is_char_boundary(pos) {
+            pos += 1;
+        }
+        pos
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Repeat(pub char, pub u16);
 
@@ -131,14 +147,13 @@ pub struct TextAlign {
 }
 
 impl TextAlign {
-    pub fn center() -> Self {
-        Self {
-            h: TextAlignH::Center,
-            v: TextAlignV::Center,
-        }
-    }
+    pub const CENTER: Self = Self {
+        h: TextAlignH::Center,
+        v: TextAlignV::Center,
+    };
 
-    pub fn new(h: TextAlignH, v: TextAlignV) -> TextAlign {
-        Self { h, v }
-    }
+    pub const TOP_LEFT: Self = Self {
+        h: TextAlignH::Left,
+        v: TextAlignV::Top,
+    };
 }

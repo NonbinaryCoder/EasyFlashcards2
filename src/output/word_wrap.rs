@@ -1,5 +1,6 @@
 use std::{borrow::Cow, iter::FusedIterator, mem};
 
+#[derive(Debug)]
 pub struct WordWrap<'a> {
     text: &'a str,
     max_length: usize,
@@ -12,6 +13,10 @@ impl<'a> WordWrap<'a> {
     pub fn new(text: &'a str, max_length: usize) -> Self {
         assert!(max_length >= 2);
         Self { text, max_length }
+    }
+
+    pub fn remaining_text_len(&self) -> usize {
+        self.text.len()
     }
 }
 

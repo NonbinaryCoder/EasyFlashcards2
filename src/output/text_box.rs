@@ -10,7 +10,9 @@ use crate::{
     vec2::{Rect, Vec2},
 };
 
-use super::{TextAlign, TextAlignH, TextAlignV};
+use super::{TextAlign, TextAlignV};
+
+pub mod input;
 
 #[derive(Debug)]
 pub struct TextBox<S: AsRef<str>> {
@@ -29,7 +31,7 @@ impl<S: AsRef<str>> TextBox<S> {
             outline_type: None,
             outline_color: Color::White,
             text: None,
-            text_align: TextAlign::center(),
+            text_align: TextAlign::CENTER,
             text_color: Color::White,
         }
     }
@@ -90,7 +92,7 @@ impl<S: AsRef<str>> TextBox<S> {
                         old_text.as_ref(),
                         self.text_align,
                         "",
-                        TextAlign::new(TextAlignH::Left, TextAlignV::Top),
+                        TextAlign::TOP_LEFT,
                     );
                     self.text = None;
                 }
@@ -123,6 +125,22 @@ impl<S: AsRef<str>> TextBox<S> {
                 text.as_ref(),
                 self.text_align,
             )
+        }
+    }
+
+    pub fn hide(&mut self) {
+        if let Some(old_text) = self.text.as_ref() {
+            overwrite_text(
+                self.inner_size(),
+                self.text_color,
+                old_text.as_ref(),
+                self.text_align,
+                "",
+                TextAlign::TOP_LEFT,
+            );
+        }
+        if self.outline_type.is_some() {
+            draw_outline(self.dims, self.outline_color, OutlineType::ERASE);
         }
     }
 
@@ -363,10 +381,6 @@ impl<'a, S: AsRef<str>> TextBoxUpdater<'a, S> {
     pub fn set_color(&mut self, color: Color) -> &mut Self {
         self.set_text_color(color).set_outline_color(color)
     }
-
-    pub fn clear_all(&mut self) -> &mut Self {
-        self.clear_outline().clear_text()
-    }
 }
 
 /// Sets `dst` to `new`, and returns true if they compare equal
@@ -453,7 +467,7 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
             outline_color: Color::White,
             items: [(); ITEMS].map(|()| MultiTextBoxItem {
                 text: None,
-                align: TextAlign::center(),
+                align: TextAlign::CENTER,
                 color: Color::White,
             }),
         }
@@ -587,6 +601,14 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
         }
     }
 
+    pub fn hide(&mut self) {
+        self.update(|updater| {
+            updater.clear_outline().foreach_text(|_, mut text| {
+                text.clear();
+            });
+        });
+    }
+
     pub fn text(&self, index: usize) -> Option<&S> {
         self.items[index].text.as_ref()
     }
@@ -680,11 +702,26 @@ impl<'a, S: AsRef<str>, const ITEMS: usize> MultiTextBoxUpdater<'a, S, ITEMS> {
         self
     }
 
+    pub fn clear_outline(&mut self) -> &mut Self {
+        self.redraw_outline |= !set_and_compare(&mut self.inner.outline_type, None);
+        self
+    }
+
     pub fn text(&mut self, index: usize) -> MultiTextBoxItemUpdater<S> {
         MultiTextBoxItemUpdater {
             item: &mut self.inner.items[index],
             changes: &mut self.items[index],
         }
+    }
+
+    pub fn foreach_text(
+        &mut self,
+        mut f: impl FnMut(usize, MultiTextBoxItemUpdater<S>),
+    ) -> &mut Self {
+        for i in 0..ITEMS {
+            f(i, self.text(i));
+        }
+        self
     }
 }
 
@@ -695,6 +732,12 @@ impl<'a, S: AsRef<str>> MultiTextBoxItemUpdater<'a, S> {
             None => self.changes.redraw = true,
         }
         self.changes.new_text = Some(Some(text));
+        self
+    }
+
+    pub fn clear(&mut self) -> &mut Self {
+        self.changes.redraw |= self.item.text.is_some();
+        self.changes.new_text = Some(None);
         self
     }
 

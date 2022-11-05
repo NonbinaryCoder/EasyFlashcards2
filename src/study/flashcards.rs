@@ -221,9 +221,7 @@ impl Entry {
                                 } else {
                                     visible_cards[Vec2::new(x, card_count.y - 1)
                                         .index_row_major(card_count.x as usize)]
-                                    .update(|updater| {
-                                        updater.clear_all();
-                                    })
+                                    .hide()
                                 }
                             }
                         }
