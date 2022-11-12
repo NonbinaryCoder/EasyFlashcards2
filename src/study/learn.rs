@@ -60,11 +60,8 @@ impl Entry {
                     return;
                 }
                 Event::Resize(x, y) => world.resize(Vec2::new(x, y)),
-                Event::Key(KeyEvent {
-                    code: KeyCode::Char(c),
-                    ..
-                }) => {
-                    if world.key_pressed(c).is_break() {
+                Event::Key(event) => {
+                    if world.key_pressed(event).is_break() {
                         break;
                     }
                 }

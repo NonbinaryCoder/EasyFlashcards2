@@ -39,14 +39,18 @@ impl Footer {
         self.render();
     }
 
-    #[rustfmt::skip]
     pub fn render(&self) {
-        queue!(io::stdout(), cursor::MoveTo(0, self.y)).unwrap();
+        queue!(
+            io::stdout(),
+            cursor::MoveTo(0, self.y),
+            style::SetForegroundColor(Color::White),
+        )
+        .unwrap();
 
-        let count = self.vals.into_iter().sum::<u32>() as f32;
-        let width = self.width as f32;
+        let count = self.vals.into_iter().sum::<u32>() as f64;
+        let width = self.width as f64;
 
-        fn print_section(amount: u32, width: u16, color: Color) {
+        fn print_section(amount: u32, width: u16, color: Color) -> u16 {
             let amount = format!("{amount}");
             let amount = &amount[..(width as usize).min(amount.len())];
             let pad = width - amount.len() as u16;
@@ -60,26 +64,39 @@ impl Footer {
                 style::Print(Repeat(' ', right_pad)),
             )
             .unwrap();
+            width
         }
 
-        let width = |val: u32| (((val as f32) / count) * width) as u16;
-        let green_width  = width(self.vals[FooterColor::Green  as usize]);
-        let yellow_width = width(self.vals[FooterColor::Yellow as usize]);
-        let red_width    = width(self.vals[FooterColor::Red    as usize]);
+        let mut leftover_width = self.width;
+        let width = |val: u32| (((val as f64) / count) * width) as u16;
 
-        print_section(self.vals[FooterColor::Green as usize],  green_width,  Color::Green);
-        print_section(self.vals[FooterColor::Yellow as usize], yellow_width, Color::Yellow);
-        print_section(self.vals[FooterColor::Red as usize], red_width, Color::Red);
-        print_section(
+        leftover_width -= print_section(
+            self.vals[FooterColor::Green as usize],
+            width(self.vals[FooterColor::Green as usize]),
+            Color::DarkGreen,
+        );
+        leftover_width -= print_section(
+            self.vals[FooterColor::Yellow as usize],
+            width(self.vals[FooterColor::Yellow as usize]),
+            Color::DarkYellow,
+        );
+        leftover_width -= print_section(
+            self.vals[FooterColor::Red as usize],
+            width(self.vals[FooterColor::Red as usize]),
+            Color::DarkRed,
+        );
+        leftover_width -= print_section(
             self.vals[FooterColor::Black as usize],
-            self.width
-                .saturating_sub(green_width)
-                .saturating_sub(yellow_width)
-                .saturating_sub(red_width),
+            width(self.vals[FooterColor::Black as usize]),
             Color::Black,
         );
 
-        queue!(io::stdout(), style::SetBackgroundColor(Color::Reset)).unwrap();
+        queue!(
+            io::stdout(),
+            style::Print(Repeat(' ', leftover_width)),
+            style::SetBackgroundColor(Color::Reset)
+        )
+        .unwrap();
     }
 }
 

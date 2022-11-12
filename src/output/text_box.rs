@@ -1,4 +1,4 @@
-use std::{array, borrow::Cow, io};
+use std::{array, io};
 
 use crossterm::{
     cursor, queue,
@@ -6,13 +6,11 @@ use crossterm::{
 };
 
 use crate::{
-    output::{word_wrap::WordWrap, Repeat},
+    output::Repeat,
     vec2::{Rect, Vec2},
 };
 
-use super::{TextAlign, TextAlignV};
-
-pub mod input;
+use super::TextAlign;
 
 #[derive(Debug)]
 pub struct TextBox<S: AsRef<str>> {
@@ -51,6 +49,7 @@ impl<S: AsRef<str>> TextBox<S> {
     pub fn update(&mut self, f: impl FnOnce(&mut TextBoxUpdater<S>)) {
         let mut updater = TextBoxUpdater {
             new_text: None,
+            text_color_changed: false,
             new_text_align: self.text_align,
             redraw_text: false,
             redraw_outline: false,
@@ -60,13 +59,14 @@ impl<S: AsRef<str>> TextBox<S> {
         let TextBoxUpdater {
             inner: _,
             new_text,
+            text_color_changed,
             new_text_align,
             redraw_text,
             redraw_outline,
         } = updater;
 
         if redraw_outline {
-            draw_outline(
+            super::draw_outline(
                 self.dims,
                 self.outline_color,
                 self.outline_type.unwrap_or(OutlineType::ERASE),
@@ -77,7 +77,7 @@ impl<S: AsRef<str>> TextBox<S> {
             match (self.text.as_ref(), new_text) {
                 (None, None) => {}
                 (None, Some(new_text)) => {
-                    draw_text(
+                    super::draw_text(
                         self.inner_size(),
                         self.text_color,
                         new_text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
@@ -86,24 +86,26 @@ impl<S: AsRef<str>> TextBox<S> {
                     self.text = new_text;
                 }
                 (Some(old_text), None) => {
-                    overwrite_text(
+                    super::overwrite_text(
                         self.inner_size(),
                         self.text_color,
                         old_text.as_ref(),
                         self.text_align,
                         "",
                         TextAlign::TOP_LEFT,
+                        text_color_changed,
                     );
                     self.text = None;
                 }
                 (Some(old_text), Some(new_text)) => {
-                    overwrite_text(
+                    super::overwrite_text(
                         self.inner_size(),
                         self.text_color,
                         old_text.as_ref(),
                         self.text_align,
                         new_text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
                         new_text_align,
+                        text_color_changed,
                     );
                     self.text = new_text;
                 }
@@ -116,10 +118,10 @@ impl<S: AsRef<str>> TextBox<S> {
     pub fn force_move_resize(&mut self, new_dims: Rect<u16>) {
         self.dims = Self::make_valid_dims(new_dims);
         if let Some(outline_type) = self.outline_type {
-            draw_outline(self.dims, self.outline_color, outline_type);
+            super::draw_outline(self.dims, self.outline_color, outline_type);
         }
         if let Some(text) = &self.text {
-            draw_text(
+            super::draw_text(
                 self.inner_size(),
                 self.text_color,
                 text.as_ref(),
@@ -130,17 +132,18 @@ impl<S: AsRef<str>> TextBox<S> {
 
     pub fn hide(&mut self) {
         if let Some(old_text) = self.text.as_ref() {
-            overwrite_text(
+            super::overwrite_text(
                 self.inner_size(),
                 self.text_color,
                 old_text.as_ref(),
                 self.text_align,
                 "",
                 TextAlign::TOP_LEFT,
+                true,
             );
         }
         if self.outline_type.is_some() {
-            draw_outline(self.dims, self.outline_color, OutlineType::ERASE);
+            super::draw_outline(self.dims, self.outline_color, OutlineType::ERASE);
         }
     }
 
@@ -153,182 +156,11 @@ impl<S: AsRef<str>> TextBox<S> {
     }
 }
 
-fn draw_outline(dims: Rect<u16>, color: Color, typ: OutlineType) {
-    queue!(
-        io::stdout(),
-        dims.pos.move_to(),
-        style::SetForegroundColor(color),
-        style::Print(typ.tl),
-        style::Print(Repeat(typ.h, dims.size.x - 2)),
-        style::Print(typ.tr)
-    )
-    .unwrap();
-    for _ in 0..(dims.size.y - 2) {
-        queue!(
-            io::stdout(),
-            cursor::MoveDown(1),
-            cursor::MoveToColumn(dims.pos.x),
-            style::Print(typ.v),
-            cursor::MoveRight(dims.size.x - 2),
-            style::Print(typ.v),
-        )
-        .unwrap();
-    }
-    queue!(
-        io::stdout(),
-        cursor::MoveDown(1),
-        cursor::MoveToColumn(dims.pos.x),
-        style::Print(typ.bl),
-        style::Print(Repeat(typ.h, dims.size.x - 2)),
-        style::Print(typ.br)
-    )
-    .unwrap();
-}
-
-fn get_lines_iter(
-    size: Vec2<u16>,
-    text: &str,
-    align: TextAlignV,
-) -> impl Iterator<Item = Cow<str>> {
-    enum LinesIter<'a> {
-        Top(std::iter::Take<WordWrap<'a>>),
-        Other(std::vec::IntoIter<Cow<'a, str>>, usize),
-    }
-    impl<'a> Iterator for LinesIter<'a> {
-        type Item = Cow<'a, str>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            match self {
-                LinesIter::Top(iter) => iter.next(),
-                LinesIter::Other(iter, offset) => {
-                    if *offset > 0 {
-                        *offset -= 1;
-                        Some(Cow::Borrowed(""))
-                    } else {
-                        iter.next()
-                    }
-                }
-            }
-        }
-    }
-
-    match align {
-        TextAlignV::Top => {
-            LinesIter::Top(WordWrap::new(text, size.x as usize).take(size.y as usize))
-        }
-        _ => {
-            let lines = {
-                let mut lines = WordWrap::new(text, size.x as usize);
-                let mut vec = Vec::from_iter(lines.by_ref().take(size.y as usize));
-                if lines.next().is_some() {
-                    if let Some(line) = vec.last_mut() {
-                        let line = line.to_mut();
-                        let mut len = line.chars().count();
-                        while len > (size.x - 3) as usize {
-                            line.pop();
-                            len -= 1;
-                        }
-                        line.push_str("...");
-                    }
-                }
-                vec
-            };
-            let len = lines.len();
-            LinesIter::Other(
-                lines.into_iter(),
-                match align {
-                    TextAlignV::Top => unreachable!(),
-                    TextAlignV::Center => (size.y as usize).saturating_sub(len) / 2,
-                    TextAlignV::Bottom => (size.y as usize).saturating_sub(len),
-                },
-            )
-        }
-    }
-}
-
-fn draw_text(dims: Rect<u16>, color: Color, text: &str, align: TextAlign) {
-    let lines = get_lines_iter(dims.size, text, align.v);
-    queue!(io::stdout(), style::SetForegroundColor(color)).unwrap();
-    for (index, line) in lines.enumerate() {
-        let line = &line;
-        if !line.is_empty() {
-            queue!(
-                io::stdout(),
-                cursor::MoveTo(
-                    dims.pos.x + align.h.padding_for(line, dims.size.x),
-                    dims.pos.y + index as u16
-                ),
-                style::Print(line),
-            )
-            .unwrap();
-        }
-    }
-}
-
-fn overwrite_text(
-    dims: Rect<u16>,
-    color: Color,
-    old_text: &str,
-    old_align: TextAlign,
-    new_text: &str,
-    new_align: TextAlign,
-) {
-    let mut old_lines = get_lines_iter(dims.size, old_text, old_align.v);
-    let mut new_lines = get_lines_iter(dims.size, new_text, new_align.v);
-    queue!(io::stdout(), style::SetForegroundColor(color)).unwrap();
-    for y in dims.pos.y..dims.pos.y + dims.size.y {
-        match (
-            &old_lines.next().filter(|s| !s.is_empty()),
-            &new_lines.next().filter(|s| !s.is_empty()),
-        ) {
-            (None, None) => {}
-            (None, Some(new_line)) => queue!(
-                io::stdout(),
-                cursor::MoveTo(
-                    dims.pos.x + new_align.h.padding_for(new_line, dims.size.x),
-                    y
-                ),
-                style::Print(new_line),
-            )
-            .unwrap(),
-            (Some(old_line), None) => queue!(
-                io::stdout(),
-                cursor::MoveTo(
-                    dims.pos.x + old_align.h.padding_for(old_line, dims.size.x),
-                    y
-                ),
-                style::Print(Repeat(' ', old_line.chars().count() as u16)),
-            )
-            .unwrap(),
-            (Some(old_line), Some(new_line)) => {
-                let old_pad = old_align.h.padding_for(old_line, dims.size.x);
-                let new_pad = new_align.h.padding_for(new_line, dims.size.x);
-                if new_pad > old_pad {
-                    queue!(
-                        io::stdout(),
-                        cursor::MoveTo(dims.pos.x + old_pad, y),
-                        style::Print(Repeat(' ', new_pad - old_pad))
-                    )
-                    .unwrap();
-                } else {
-                    queue!(io::stdout(), cursor::MoveTo(dims.pos.x + new_pad, y)).unwrap();
-                }
-                queue!(io::stdout(), style::Print(new_line)).unwrap();
-
-                let old_len = old_pad + old_line.chars().count() as u16;
-                let new_len = new_pad + new_line.chars().count() as u16;
-                if old_len > new_len {
-                    queue!(io::stdout(), style::Print(Repeat(' ', old_len - new_len))).unwrap();
-                }
-            }
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct TextBoxUpdater<'a, S: AsRef<str>> {
     inner: &'a mut TextBox<S>,
     new_text: Option<Option<S>>,
+    text_color_changed: bool,
     new_text_align: TextAlign,
     redraw_text: bool,
     redraw_outline: bool,
@@ -351,7 +183,9 @@ impl<'a, S: AsRef<str>> TextBoxUpdater<'a, S> {
     }
 
     pub fn set_text_color(&mut self, color: Color) -> &mut Self {
-        self.redraw_text |= !set_and_compare(&mut self.inner.text_color, color);
+        let changed = !set_and_compare(&mut self.inner.text_color, color);
+        self.text_color_changed |= changed;
+        self.redraw_text |= changed;
         self
     }
 
@@ -392,12 +226,12 @@ fn set_and_compare<T: PartialEq>(dst: &mut T, new: T) -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutlineType {
-    tl: char,
-    tr: char,
-    bl: char,
-    br: char,
-    h: char,
-    v: char,
+    pub tl: char,
+    pub tr: char,
+    pub bl: char,
+    pub br: char,
+    pub h: char,
+    pub v: char,
 }
 
 #[allow(dead_code)]
@@ -496,6 +330,7 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
         let mut updater = MultiTextBoxUpdater {
             items: array::from_fn(|i| MultiTextBoxItemChanges {
                 new_text: None,
+                text_color_changed: false,
                 new_align: self.items[i].align,
                 redraw: false,
             }),
@@ -524,6 +359,7 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
             (
                 MultiTextBoxItemChanges {
                     new_text,
+                    text_color_changed,
                     new_align,
                     redraw,
                 },
@@ -542,7 +378,7 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
                 match (item.text.as_ref(), new_text) {
                     (None, None) => {}
                     (None, Some(text)) => {
-                        draw_text(
+                        super::draw_text(
                             dims,
                             item.color,
                             text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
@@ -551,16 +387,17 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
                         item.text = text;
                     }
                     (Some(text), None) => {
-                        draw_text(dims, item.color, text.as_ref(), item.align);
+                        super::draw_text(dims, item.color, text.as_ref(), item.align);
                     }
                     (Some(old_text), Some(new_text)) => {
-                        overwrite_text(
+                        super::overwrite_text(
                             dims,
                             item.color,
                             old_text.as_ref(),
                             item.align,
                             new_text.as_ref().map(AsRef::as_ref).unwrap_or_default(),
                             new_align,
+                            text_color_changed,
                         );
                         item.text = new_text;
                     }
@@ -587,7 +424,7 @@ impl<S: AsRef<str>, const ITEMS: usize> MultiTextBox<S, ITEMS> {
         let mut selected_pos = new_dims.pos + Vec2::splat(1);
         for item in &self.items {
             if let Some(text) = &item.text {
-                draw_text(
+                super::draw_text(
                     Rect {
                         pos: selected_pos,
                         size: self.item_size,
@@ -686,6 +523,7 @@ pub struct MultiTextBoxUpdater<'a, S: AsRef<str>, const ITEMS: usize> {
 #[derive(Debug)]
 pub struct MultiTextBoxItemChanges<S: AsRef<str>> {
     new_text: Option<Option<S>>,
+    text_color_changed: bool,
     new_align: TextAlign,
     redraw: bool,
 }
@@ -742,7 +580,9 @@ impl<'a, S: AsRef<str>> MultiTextBoxItemUpdater<'a, S> {
     }
 
     pub fn set_color(&mut self, color: Color) -> &mut Self {
-        self.changes.redraw |= !set_and_compare(&mut self.item.color, color);
+        let changed = !set_and_compare(&mut self.item.color, color);
+        self.changes.text_color_changed |= changed;
+        self.changes.redraw |= changed;
         self
     }
 }

@@ -7,7 +7,7 @@ use rand::{seq::SliceRandom, Rng};
 
 use crate::flashcards::{Flashcard, RecallSettings, Set, Side};
 
-use super::footer::FooterColor;
+use super::footer::{Footer, FooterColor};
 
 #[derive(Debug)]
 pub struct Item<'a> {
@@ -92,35 +92,41 @@ impl<'a> CardList<'a> {
         }
     }
 
-    /// Progresses the card specified and returns it's new footer color
-    pub fn progress(&mut self, card: Token) -> FooterColor {
+    pub fn progress(&mut self, card: Token, footer: &mut Footer) {
         let index = card.0;
         let card = &self.cards[index];
-        match card
+        let old_color = card.footer_color;
+        let new_color = match card
             .next_study_type
             .progress(self.recall_settings(card.side))
         {
             (Some(next_study_type), color) => {
-                self.cards[index].next_study_type = next_study_type;
+                let card = &mut self.cards[index];
+                card.next_study_type = next_study_type;
+                card.footer_color = color;
                 color
             }
             (None, color) => {
                 self.cards.swap_remove(index);
                 color
             }
-        }
+        };
+        footer.r#move(old_color, new_color);
     }
 
-    /// Regresses the card specified and returns it's new footer color
-    pub fn regress(&mut self, card: Token) -> Option<FooterColor> {
+    pub fn regress(&mut self, card: Token, footer: &mut Footer) {
         let index = card.0;
         let card = &self.cards[index];
-        card.next_study_type
+        let old_color = card.footer_color;
+        if let Some((next_study_type, new_color)) = card
+            .next_study_type
             .regress(self.recall_settings(card.side))
-            .map(|(next_study_type, color)| {
-                self.cards[index].next_study_type = next_study_type;
-                color
-            })
+        {
+            let card = &mut self.cards[index];
+            card.next_study_type = next_study_type;
+            card.footer_color = new_color;
+            footer.r#move(old_color, new_color);
+        }
     }
 
     pub fn matching_answers_for(&self, card: &Item<'a>) -> [Rc<str>; 4] {

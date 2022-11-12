@@ -1,10 +1,17 @@
-use std::{fmt::Display, io};
+use std::{borrow::Cow, fmt::Display, io};
 
 use crossterm::{
     cursor, execute, queue,
     style::{self, Color, Stylize},
     terminal,
 };
+
+use crate::{
+    output::word_wrap::WordWrap,
+    vec2::{Rect, Vec2},
+};
+
+use self::text_box::OutlineType;
 
 pub mod text_box;
 pub mod word_wrap;
@@ -156,4 +163,181 @@ impl TextAlign {
         h: TextAlignH::Left,
         v: TextAlignV::Top,
     };
+}
+
+pub fn draw_outline(dims: Rect<u16>, color: Color, typ: OutlineType) {
+    queue!(
+        io::stdout(),
+        dims.pos.move_to(),
+        style::SetForegroundColor(color),
+        style::Print(typ.tl),
+        style::Print(Repeat(typ.h, dims.size.x - 2)),
+        style::Print(typ.tr)
+    )
+    .unwrap();
+    for _ in 0..(dims.size.y - 2) {
+        queue!(
+            io::stdout(),
+            cursor::MoveDown(1),
+            cursor::MoveToColumn(dims.pos.x),
+            style::Print(typ.v),
+            cursor::MoveRight(dims.size.x - 2),
+            style::Print(typ.v),
+        )
+        .unwrap();
+    }
+    queue!(
+        io::stdout(),
+        cursor::MoveDown(1),
+        cursor::MoveToColumn(dims.pos.x),
+        style::Print(typ.bl),
+        style::Print(Repeat(typ.h, dims.size.x - 2)),
+        style::Print(typ.br)
+    )
+    .unwrap();
+}
+
+fn get_lines_iter(
+    size: Vec2<u16>,
+    text: &str,
+    align: TextAlignV,
+) -> impl Iterator<Item = Cow<str>> {
+    enum LinesIter<'a> {
+        Top(std::iter::Take<WordWrap<'a>>),
+        Other(std::vec::IntoIter<Cow<'a, str>>, usize),
+    }
+    impl<'a> Iterator for LinesIter<'a> {
+        type Item = Cow<'a, str>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            match self {
+                LinesIter::Top(iter) => iter.next(),
+                LinesIter::Other(iter, offset) => {
+                    if *offset > 0 {
+                        *offset -= 1;
+                        Some(Cow::Borrowed(""))
+                    } else {
+                        iter.next()
+                    }
+                }
+            }
+        }
+    }
+
+    match align {
+        TextAlignV::Top => {
+            LinesIter::Top(WordWrap::new(text, size.x as usize).take(size.y as usize))
+        }
+        _ => {
+            let lines = {
+                let mut lines = WordWrap::new(text, size.x as usize);
+                let mut vec = Vec::from_iter(lines.by_ref().take(size.y as usize));
+                if lines.next().is_some() {
+                    if let Some(line) = vec.last_mut() {
+                        let line = line.to_mut();
+                        let mut len = line.chars().count();
+                        while len > (size.x - 3) as usize {
+                            line.pop();
+                            len -= 1;
+                        }
+                        line.push_str("...");
+                    }
+                }
+                vec
+            };
+            let len = lines.len();
+            LinesIter::Other(
+                lines.into_iter(),
+                match align {
+                    TextAlignV::Top => unreachable!(),
+                    TextAlignV::Center => (size.y as usize).saturating_sub(len) / 2,
+                    TextAlignV::Bottom => (size.y as usize).saturating_sub(len),
+                },
+            )
+        }
+    }
+}
+
+pub fn draw_text(dims: Rect<u16>, color: Color, text: &str, align: TextAlign) {
+    let lines = get_lines_iter(dims.size, text, align.v);
+    queue!(io::stdout(), style::SetForegroundColor(color)).unwrap();
+    for (index, line) in lines.enumerate() {
+        let line = &line;
+        if !line.is_empty() {
+            queue!(
+                io::stdout(),
+                cursor::MoveTo(
+                    dims.pos.x + align.h.padding_for(line, dims.size.x),
+                    dims.pos.y + index as u16
+                ),
+                style::Print(line),
+            )
+            .unwrap();
+        }
+    }
+}
+
+pub fn overwrite_text(
+    dims: Rect<u16>,
+    color: Color,
+    old_text: &str,
+    old_align: TextAlign,
+    new_text: &str,
+    new_align: TextAlign,
+    always_overwrite: bool,
+) {
+    let mut old_lines = get_lines_iter(dims.size, old_text, old_align.v);
+    let mut new_lines = get_lines_iter(dims.size, new_text, new_align.v);
+    queue!(io::stdout(), style::SetForegroundColor(color)).unwrap();
+    for y in dims.pos.y..dims.pos.y + dims.size.y {
+        match (
+            &old_lines.next().filter(|s| !s.is_empty()),
+            &new_lines.next().filter(|s| !s.is_empty()),
+        ) {
+            (None, None) => {}
+            (None, Some(new_line)) => queue!(
+                io::stdout(),
+                cursor::MoveTo(
+                    dims.pos.x + new_align.h.padding_for(new_line, dims.size.x),
+                    y
+                ),
+                style::Print(new_line.trim_end()),
+            )
+            .unwrap(),
+            (Some(old_line), None) => queue!(
+                io::stdout(),
+                cursor::MoveTo(
+                    dims.pos.x + old_align.h.padding_for(old_line.trim_end(), dims.size.x),
+                    y
+                ),
+                style::Print(Repeat(' ', old_line.chars().count() as u16)),
+            )
+            .unwrap(),
+            (Some(old_line), Some(new_line)) => {
+                let old_line = old_line.trim_end();
+                let new_line = new_line.trim_end();
+                if always_overwrite || old_line != new_line {
+                    let old_pad = old_align.h.padding_for(old_line, dims.size.x);
+                    let new_pad = new_align.h.padding_for(new_line, dims.size.x);
+                    if new_pad > old_pad {
+                        queue!(
+                            io::stdout(),
+                            cursor::MoveTo(dims.pos.x + old_pad, y),
+                            style::Print(Repeat(' ', new_pad - old_pad))
+                        )
+                        .unwrap();
+                    } else {
+                        queue!(io::stdout(), cursor::MoveTo(dims.pos.x + new_pad, y)).unwrap();
+                    }
+                    queue!(io::stdout(), style::Print(new_line)).unwrap();
+
+                    let old_len = old_pad + old_line.chars().count() as u16;
+                    let new_len = new_pad + new_line.chars().count() as u16;
+                    if old_len > new_len {
+                        queue!(io::stdout(), style::Print(Repeat(' ', old_len - new_len))).unwrap();
+                    }
+                }
+            }
+        }
+    }
 }

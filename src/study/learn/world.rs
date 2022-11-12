@@ -5,6 +5,7 @@ use std::{
 };
 
 use crossterm::{
+    event::{KeyCode, KeyEvent},
     queue,
     style::Color,
     terminal::{self, ClearType},
@@ -12,8 +13,9 @@ use crossterm::{
 
 use crate::{
     flashcards::Set,
+    input::text::TextInput,
     output::{
-        text_box::{input::TextInput, MultiOutlineType, MultiTextBox, OutlineType, TextBox},
+        text_box::{MultiOutlineType, MultiTextBox, OutlineType, TextBox},
         TerminalSettings,
     },
     vec2::{Rect, Vec2},
@@ -26,6 +28,11 @@ use self::{
 
 mod card_list;
 mod footer;
+
+thread_local! {
+    static CORRECT: Rc<str> = Rc::from("Correct!  Press any key to continue");
+    static TEXT_FAILED: Rc<str> = Rc::from("Incorrect!  Shift-Tab: typo, I know this");
+}
 
 #[derive(Debug)]
 pub struct World<'a> {
@@ -46,6 +53,10 @@ enum WorldType {
     },
     Text {
         studying: card_list::Token,
+    },
+    TextFailed {
+        studying: card_list::Token,
+        hidden_question: Option<Rc<str>>,
     },
     WaitingForKeypress,
 }
@@ -94,8 +105,12 @@ impl<'a> World<'a> {
                 let (item, token) = item.tup();
                 match item.next_study_type {
                     StudyType::Matching(_) => {
+                        self.text_input.hide();
+
                         self.question_box.update(|updater| {
-                            updater.set_text(item.card[!item.side].display().clone());
+                            updater
+                                .set_text(item.card[!item.side].display().clone())
+                                .set_text_color(Color::White);
                         });
                         self.matching_answers_boxes.update(|updater| {
                             for (i, answer) in self
@@ -108,7 +123,6 @@ impl<'a> World<'a> {
                             }
                             updater.set_outline(MultiOutlineType::DOUBLE_LIGHT);
                         });
-                        self.text_input.hide();
 
                         self.typ = Some(WorldType::Matching {
                             studying: token,
@@ -116,14 +130,23 @@ impl<'a> World<'a> {
                         });
                     }
                     StudyType::Text(_) => {
-                        self.question_box.update(|updater| {
-                            updater.set_text(item.card[!item.side].display().clone());
-                        });
                         self.matching_answers_boxes.hide();
-                        self.text_input.set_outline(OutlineType::DOUBLE);
-                        io::stdout().flush().unwrap();
 
-                        let answer = self.text_input.get_input(self.term_settings);
+                        self.question_box.update(|updater| {
+                            updater
+                                .set_text(item.card[!item.side].display().clone())
+                                .set_text_color(Color::White);
+                        });
+                        self.text_input.update(|updater| {
+                            updater
+                                .set_outline(OutlineType::DOUBLE)
+                                .clear_text()
+                                .clear_correct_answer();
+                        });
+                        self.term_settings.show_cursor();
+                        self.text_input.go_to_cursor();
+
+                        self.typ = Some(WorldType::Text { studying: token });
                     }
                 }
                 true
@@ -140,6 +163,7 @@ impl<'a> World<'a> {
     pub fn resize(&mut self, size: Vec2<u16>) {
         let height_minus_padding = size.y.saturating_sub(7);
         let box_height = height_minus_padding / 2;
+        let bottom_box_y = size.y.saturating_sub(box_height).saturating_sub(3);
 
         queue!(io::stdout(), terminal::Clear(ClearType::All)).unwrap();
 
@@ -150,7 +174,12 @@ impl<'a> World<'a> {
 
         self.matching_answers_boxes.force_move_resize(Rect {
             size: Vec2::new(size.x.saturating_sub(8), box_height),
-            pos: Vec2::new(4, size.y.saturating_sub(box_height).saturating_sub(3)),
+            pos: Vec2::new(4, bottom_box_y),
+        });
+
+        self.text_input.force_move_resize(Rect {
+            size: Vec2::new(size.x / 3, box_height),
+            pos: Vec2::new(size.x / 3, bottom_box_y),
         });
 
         self.footer.resize(size);
@@ -158,50 +187,124 @@ impl<'a> World<'a> {
         io::stdout().flush().unwrap();
     }
 
-    pub fn key_pressed(&mut self, key: char) -> ControlFlow<()> {
+    pub fn key_pressed(&mut self, event: KeyEvent) -> ControlFlow<()> {
+        let code = event.code;
         match self.typ {
             Some(WorldType::Matching {
                 studying,
                 ref mut failed,
             }) => {
-                if ('1'..='4').contains(&key) {
-                    let index = key as usize - '1' as usize;
-                    let card = &self.card_list[studying];
-                    let text_color = match card.card[card.side].contains(
-                        self.matching_answers_boxes.text(index).unwrap(),
-                        self.card_list.recall_settings(card.side),
-                    ) {
-                        true => {
+                if let KeyCode::Char(key) = code {
+                    if ('1'..='4').contains(&key) {
+                        let index = key as usize - '1' as usize;
+                        let card = &self.card_list[studying];
+                        let text_color;
+
+                        if card.card[card.side].contains(
+                            self.matching_answers_boxes.text(index).unwrap(),
+                            self.card_list.recall_settings(card.side),
+                        ) {
+                            text_color = Color::Green;
                             let failed = *failed;
                             self.typ = Some(WorldType::WaitingForKeypress);
-                            let old_color = card.footer_color;
-                            let new_color = self.card_list.progress(studying);
                             if !failed {
-                                self.footer.r#move(old_color, new_color);
+                                self.card_list.progress(studying, &mut self.footer);
                             }
-                            Color::Green
-                        }
-                        false => {
+
+                            self.question_box.update(|updater| {
+                                updater
+                                    .set_text(CORRECT.with(Clone::clone))
+                                    .set_text_color(Color::Green);
+                            });
+                        } else {
+                            text_color = Color::Red;
                             if !*failed {
                                 *failed = true;
-                                let old_color = card.footer_color;
-                                if let Some(new_color) = self.card_list.regress(studying) {
-                                    self.footer.r#move(old_color, new_color);
-                                }
+                                self.card_list.regress(studying, &mut self.footer);
                             }
-                            Color::Red
-                        }
-                    };
-                    self.matching_answers_boxes.update(|updater| {
-                        updater.text(index).set_color(text_color);
-                    });
-                    io::stdout().flush().unwrap();
+                        };
+
+                        self.matching_answers_boxes.update(|updater| {
+                            updater.text(index).set_color(text_color);
+                        });
+                        io::stdout().flush().unwrap();
+                    }
                 }
                 ControlFlow::Continue(())
             }
             Some(WorldType::Text { studying }) => {
-                self.text_input.get_input(self.term_settings);
-                ControlFlow::Break(())
+                if let Some(answer) = self.text_input.read_input(code) {
+                    let card = &self.card_list[studying];
+                    if card.card[card.side]
+                        .contains(answer, self.card_list.recall_settings(card.side))
+                    {
+                        self.card_list.progress(studying, &mut self.footer);
+                        self.question_box.update(|updater| {
+                            updater
+                                .set_text(CORRECT.with(Clone::clone))
+                                .set_text_color(Color::Green);
+                        });
+                        self.term_settings.hide_cursor();
+
+                        self.typ = Some(WorldType::WaitingForKeypress);
+                    } else {
+                        let hidden_question = self.question_box.get_text().clone();
+                        self.question_box.update(|updater| {
+                            updater
+                                .set_text(TEXT_FAILED.with(Clone::clone))
+                                .set_text_color(Color::Red);
+                        });
+                        self.text_input
+                            .correct_answer_is(card.card[card.side].display().clone());
+                        self.card_list.regress(studying, &mut self.footer);
+                        self.text_input.go_to_cursor();
+
+                        self.typ = Some(WorldType::TextFailed {
+                            studying,
+                            hidden_question,
+                        });
+                    }
+                } else {
+                    self.text_input.go_to_cursor();
+                }
+                io::stdout().flush().unwrap();
+                ControlFlow::Continue(())
+            }
+            Some(WorldType::TextFailed {
+                studying,
+                ref mut hidden_question,
+            }) => {
+                if code == KeyCode::BackTab {
+                    self.card_list.progress(studying, &mut self.footer);
+                    self.card_list.progress(studying, &mut self.footer);
+                    self.term_settings.hide_cursor();
+                    match self.study_next() {
+                        true => ControlFlow::Continue(()),
+                        false => ControlFlow::Break(()),
+                    }
+                } else {
+                    if let Some(question) = hidden_question.take() {
+                        self.question_box.update(|updater| {
+                            updater.set_text(question).set_text_color(Color::White);
+                        })
+                    }
+                    self.text_input.read_input(code);
+                    let card = &self.card_list[studying];
+                    if card.card[card.side].contains(
+                        self.text_input.get_text(),
+                        self.card_list.recall_settings(card.side),
+                    ) {
+                        self.term_settings.hide_cursor();
+                        match self.study_next() {
+                            true => ControlFlow::Continue(()),
+                            false => ControlFlow::Break(()),
+                        }
+                    } else {
+                        self.text_input.go_to_cursor();
+                        io::stdout().flush().unwrap();
+                        ControlFlow::Continue(())
+                    }
+                }
             }
             Some(WorldType::WaitingForKeypress) => match self.study_next() {
                 true => ControlFlow::Continue(()),
