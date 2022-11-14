@@ -7,6 +7,8 @@ use rand::{seq::SliceRandom, Rng};
 
 use crate::flashcards::{Flashcard, RecallSettings, Set, Side};
 
+use self::fail_count::FailCount;
+
 use super::footer::{Footer, FooterColor};
 
 #[derive(Debug)]
@@ -15,6 +17,27 @@ pub struct Item<'a> {
     pub side: Side,
     pub next_study_type: StudyType,
     pub footer_color: FooterColor,
+    pub match_fails: FailCount,
+    pub text_fails: FailCount,
+}
+
+#[derive(Debug)]
+pub struct FailedItem<'a> {
+    pub card: &'a Flashcard,
+    pub side: Side,
+    pub match_fails: FailCount,
+    pub text_fails: FailCount,
+}
+
+impl<'a> From<&Item<'a>> for FailedItem<'a> {
+    fn from(item: &Item<'a>) -> Self {
+        FailedItem {
+            card: item.card,
+            side: item.side,
+            match_fails: item.match_fails,
+            text_fails: item.text_fails,
+        }
+    }
 }
 
 /// A token representing an item in a card list
@@ -44,6 +67,7 @@ impl<'a, 'b> RefToken<'a, 'b> {
 #[derive(Debug)]
 pub struct CardList<'a> {
     cards: Vec<Item<'a>>,
+    removed: Vec<FailedItem<'a>>,
     set: &'a Set,
 }
 
@@ -64,6 +88,8 @@ impl<'a> CardList<'a> {
                     side,
                     next_study_type,
                     footer_color: FooterColor::Black,
+                    match_fails: FailCount::ZERO,
+                    text_fails: FailCount::ZERO,
                 }))
             }
         };
@@ -71,7 +97,11 @@ impl<'a> CardList<'a> {
         extend_cards(term_start, Side::Term);
         extend_cards(definition_start, Side::Definition);
 
-        Self { cards, set }
+        Self {
+            removed: Vec::new(),
+            cards,
+            set,
+        }
     }
 
     pub fn next_unstudied(&self, last: Option<Token>) -> Option<RefToken<'_, 'a>> {
@@ -107,7 +137,10 @@ impl<'a> CardList<'a> {
                 color
             }
             (None, color) => {
-                self.cards.swap_remove(index);
+                let card = self.cards.swap_remove(index);
+                if card.match_fails.has_failed() || card.text_fails.has_failed() {
+                    self.removed.push((&card).into());
+                }
                 color
             }
         };
@@ -126,6 +159,14 @@ impl<'a> CardList<'a> {
             card.next_study_type = next_study_type;
             card.footer_color = new_color;
             footer.r#move(old_color, new_color);
+        }
+    }
+
+    pub fn fail(&mut self, card: Token) {
+        let card = &mut self.cards[card.0];
+        match card.next_study_type {
+            StudyType::Matching(_) => card.match_fails.inc(),
+            StudyType::Text(_) => card.text_fails.inc(),
         }
     }
 
@@ -154,8 +195,15 @@ impl<'a> CardList<'a> {
         self.set.recall_settings(side)
     }
 
-    pub fn len(&self) -> usize {
+    pub fn remaining_unstudied(&self) -> usize {
         self.cards.len()
+    }
+
+    pub fn fails(&mut self) -> &[FailedItem] {
+        self.removed.extend(self.cards.iter().filter_map(|item| {
+            (item.match_fails.has_failed() || item.text_fails.has_failed()).then_some(item.into())
+        }));
+        &self.removed
     }
 }
 
@@ -229,6 +277,49 @@ impl StudyType {
             (Text(true),     true,  true)  => Some((Text(false),     FooterColor::Red)),
 
             _ => None,
+        }
+    }
+}
+
+pub mod fail_count {
+    use std::fmt;
+
+    #[derive(Clone, Copy)]
+    pub struct FailCount(u8);
+
+    impl fmt::Display for FailCount {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if self.0 > 100 {
+                write!(f, "100+")
+            } else {
+                write!(f, "{}", self.0)
+            }
+        }
+    }
+
+    impl fmt::Debug for FailCount {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if self.0 > 100 {
+                write!(f, "100+")
+            } else {
+                write!(f, "{}", self.0)
+            }
+        }
+    }
+
+    impl FailCount {
+        pub const ZERO: Self = Self(0);
+
+        pub fn inc(&mut self) {
+            self.0 = self.0.saturating_add(1);
+        }
+
+        pub fn has_failed(&self) -> bool {
+            self.0 > 0
+        }
+
+        pub fn count(&self) -> u8 {
+            self.0
         }
     }
 }

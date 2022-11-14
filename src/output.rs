@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{borrow::Cow, fmt::Display, io};
 
 use crossterm::{
@@ -339,5 +340,25 @@ pub fn overwrite_text(
                 }
             }
         }
+    }
+}
+
+/// (total, fract)
+#[derive(Debug, Clone, Copy)]
+pub struct Proportion<T: Copy + PartialEq + Into<f64>>(pub T, pub T);
+
+impl<T: Copy + PartialEq + Into<f64>> fmt::Display for Proportion<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let total = self.0.into();
+        let fract = self.1.into();
+        let frac_str;
+        let (frac_str, is_nonneg) = if total > f64::EPSILON {
+            let frac = (fract / total) * 100.0;
+            frac_str = format!("{frac:.0}%");
+            (frac_str.as_str(), frac >= 0.0)
+        } else {
+            ("NaN", true)
+        };
+        f.pad_integral(is_nonneg, "", frac_str)
     }
 }

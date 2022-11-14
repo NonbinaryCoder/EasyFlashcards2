@@ -446,8 +446,8 @@ impl From<&str> for FlashcardText {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Side {
-    Term,
-    Definition,
+    Term = 0,
+    Definition = 1,
 }
 
 impl Side {

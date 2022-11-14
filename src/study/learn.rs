@@ -45,7 +45,7 @@ impl Entry {
                 .expect("unable to get terminal size")
                 .into(),
             &set,
-            &mut term_settings,
+            term_settings,
         );
 
         loop {
@@ -55,8 +55,7 @@ impl Entry {
                     modifiers,
                     ..
                 }) if modifiers.contains(KeyModifiers::CONTROL) => {
-                    term_settings.clear();
-                    println!("Exited with ctrl-c");
+                    world.print_stats(Some("Exited with ctrl-c"));
                     return;
                 }
                 Event::Resize(x, y) => world.resize(Vec2::new(x, y)),
@@ -69,6 +68,6 @@ impl Entry {
             }
         }
 
-        term_settings.clear();
+        world.print_stats(None);
     }
 }

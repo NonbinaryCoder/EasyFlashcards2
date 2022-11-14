@@ -7,16 +7,16 @@ use std::{
 use crossterm::{
     event::{KeyCode, KeyEvent},
     queue,
-    style::Color,
+    style::{Color, Stylize},
     terminal::{self, ClearType},
 };
 
 use crate::{
-    flashcards::Set,
+    flashcards::{Set, Side},
     input::text::TextInput,
     output::{
         text_box::{MultiOutlineType, MultiTextBox, OutlineType, TextBox},
-        TerminalSettings,
+        Proportion, TerminalSettings,
     },
     vec2::{Rect, Vec2},
 };
@@ -41,7 +41,9 @@ pub struct World<'a> {
     text_input: TextInput,
     footer: Footer,
     card_list: CardList<'a>,
-    term_settings: &'a mut TerminalSettings,
+    term_settings: TerminalSettings,
+    matches_made: [u32; 2],
+    texts_entered: [u32; 2],
     typ: Option<WorldType>,
 }
 
@@ -63,7 +65,7 @@ enum WorldType {
 
 impl<'a> World<'a> {
     #[must_use]
-    pub fn new(size: Vec2<u16>, set: &'a Set, term_settings: &'a mut TerminalSettings) -> Self {
+    pub fn new(size: Vec2<u16>, set: &'a Set, term_settings: TerminalSettings) -> Self {
         let card_list = CardList::from_set(set);
 
         let height_minus_padding = size.y.saturating_sub(7);
@@ -88,9 +90,11 @@ impl<'a> World<'a> {
                 size: Vec2::new(size.x / 3, box_height),
                 pos: Vec2::new(size.x / 3, bottom_box_y),
             }),
-            footer: Footer::new(card_list.len() as u32, size),
+            footer: Footer::new(card_list.remaining_unstudied() as u32, size),
             card_list,
             term_settings,
+            matches_made: [0, 0],
+            texts_entered: [0, 0],
             typ: None,
         };
 
@@ -208,6 +212,7 @@ impl<'a> World<'a> {
                             let failed = *failed;
                             self.typ = Some(WorldType::WaitingForKeypress);
                             if !failed {
+                                self.matches_made[card.side as usize] += 1;
                                 self.card_list.progress(studying, &mut self.footer);
                             }
 
@@ -220,6 +225,8 @@ impl<'a> World<'a> {
                             text_color = Color::Red;
                             if !*failed {
                                 *failed = true;
+                                self.matches_made[card.side as usize] += 1;
+                                self.card_list.fail(studying);
                                 self.card_list.regress(studying, &mut self.footer);
                             }
                         };
@@ -238,6 +245,7 @@ impl<'a> World<'a> {
                     if card.card[card.side]
                         .contains(answer, self.card_list.recall_settings(card.side))
                     {
+                        self.texts_entered[card.side as usize] += 1;
                         self.card_list.progress(studying, &mut self.footer);
                         self.question_box.update(|updater| {
                             updater
@@ -248,6 +256,7 @@ impl<'a> World<'a> {
 
                         self.typ = Some(WorldType::WaitingForKeypress);
                     } else {
+                        self.texts_entered[card.side as usize] += 1;
                         let hidden_question = self.question_box.get_text().clone();
                         self.question_box.update(|updater| {
                             updater
@@ -256,6 +265,7 @@ impl<'a> World<'a> {
                         });
                         self.text_input
                             .correct_answer_is(card.card[card.side].display().clone());
+                        self.card_list.fail(studying);
                         self.card_list.regress(studying, &mut self.footer);
                         self.text_input.go_to_cursor();
 
@@ -311,6 +321,70 @@ impl<'a> World<'a> {
                 false => ControlFlow::Break(()),
             },
             None => ControlFlow::Break(()),
+        }
+    }
+
+    pub fn print_stats(self, error_code: Option<&str>) {
+        let Self {
+            mut card_list,
+            term_settings,
+            matches_made,
+            texts_entered,
+            ..
+        } = self;
+        term_settings.clear();
+
+        if let Some(error_code) = error_code {
+            println!("{}", error_code.red());
+        }
+        println!("{}", "Stats:".bold());
+        println!("               |  total   |   term   |definition|");
+
+        let mut match_fails = [0, 0];
+        let mut text_fails = [0, 0];
+        for fail in card_list.fails() {
+            match_fails[fail.side as usize] += fail.match_fails.count() as u32;
+            text_fails[fail.side as usize] += fail.text_fails.count() as u32;
+        }
+
+        // Matches made
+        let mm: u32 = matches_made.into_iter().sum();
+        if mm > 0 {
+            let tmm = matches_made[Side::Term as usize];
+            let dmm = matches_made[Side::Definition as usize];
+            println!("Matches made:  |{mm:^10}|{tmm:^10}|{dmm:^10}|");
+
+            // Match fails
+            let mf: u32 = match_fails.into_iter().sum();
+            let tmf = match_fails[Side::Term as usize];
+            let dmf = match_fails[Side::Definition as usize];
+            println!("Match fails:   |{mf:^10}|{tmf:^10}|{dmf:^10}|");
+
+            // Proportions
+            let mfp = Proportion(mm, mf);
+            let tmfp = Proportion(tmm, tmf);
+            let dmfp = Proportion(dmm, dmf);
+            println!("               |{mfp:^10}|{tmfp:^10}|{dmfp:^10}|");
+        }
+
+        // Texts entered
+        let te: u32 = texts_entered.into_iter().sum();
+        if te > 0 {
+            let tte = texts_entered[Side::Term as usize];
+            let dte = texts_entered[Side::Definition as usize];
+            println!("Texts entered: |{te:^10}|{tte:^10}|{dte:^10}|");
+
+            // Text fails
+            let tf: u32 = text_fails.into_iter().sum();
+            let ttf = text_fails[Side::Term as usize];
+            let dtf = text_fails[Side::Definition as usize];
+            println!("Text fails:    |{tf:^10}|{ttf:^10}|{dtf:^10}|");
+
+            // Proportions
+            let tfp = Proportion(te, tf);
+            let ttfp = Proportion(tte, ttf);
+            let dtfp = Proportion(dte, dtf);
+            println!("               |{tfp:^10}|{ttfp:^10}|{dtfp:^10}|");
         }
     }
 }
