@@ -1,13 +1,14 @@
 use std::{
+    fmt::Display,
     io::{self, Write},
-    ops::ControlFlow,
+    ops::{Add, ControlFlow},
     rc::Rc,
 };
 
 use crossterm::{
     event::{KeyCode, KeyEvent},
-    queue,
-    style::{Color, Stylize},
+    execute, queue,
+    style::{self, Color, Stylize},
     terminal::{self, ClearType},
 };
 
@@ -18,6 +19,7 @@ use crate::{
         text_box::{MultiOutlineType, MultiTextBox, OutlineType, TextBox},
         Proportion, TerminalSettings,
     },
+    study::learn::world::card_list::fail_count::FailCount,
     vec2::{Rect, Vec2},
 };
 
@@ -338,53 +340,139 @@ impl<'a> World<'a> {
             println!("{}", error_code.red());
         }
         println!("{}", "Stats:".bold());
-        println!("               |  total   |   term   |definition|");
+        println!("                |  total   |   term   |definition|");
 
         let mut match_fails = [0, 0];
         let mut text_fails = [0, 0];
-        for fail in card_list.fails() {
+        let fails = card_list.fails();
+        for fail in &*fails {
             match_fails[fail.side as usize] += fail.match_fails.count() as u32;
             text_fails[fail.side as usize] += fail.text_fails.count() as u32;
         }
 
-        // Matches made
-        let mm: u32 = matches_made.into_iter().sum();
-        if mm > 0 {
-            let tmm = matches_made[Side::Term as usize];
-            let dmm = matches_made[Side::Definition as usize];
-            println!("Matches made:  |{mm:^10}|{tmm:^10}|{dmm:^10}|");
-
-            // Match fails
-            let mf: u32 = match_fails.into_iter().sum();
-            let tmf = match_fails[Side::Term as usize];
-            let dmf = match_fails[Side::Definition as usize];
-            println!("Match fails:   |{mf:^10}|{tmf:^10}|{dmf:^10}|");
-
-            // Proportions
-            let mfp = Proportion(mm, mf);
-            let tmfp = Proportion(tmm, tmf);
-            let dmfp = Proportion(dmm, dmf);
-            println!("               |{mfp:^10}|{tmfp:^10}|{dmfp:^10}|");
+        #[derive(Debug)]
+        struct StatsSection {
+            made: StatsLine<u32>,
+            fails: StatsLine<u32>,
         }
 
-        // Texts entered
-        let te: u32 = texts_entered.into_iter().sum();
-        if te > 0 {
-            let tte = texts_entered[Side::Term as usize];
-            let dte = texts_entered[Side::Definition as usize];
-            println!("Texts entered: |{te:^10}|{tte:^10}|{dte:^10}|");
+        #[derive(Debug)]
+        struct StatsLine<T> {
+            tag: &'static str,
+            term: T,
+            definition: T,
+            total: T,
+        }
 
-            // Text fails
-            let tf: u32 = text_fails.into_iter().sum();
-            let ttf = text_fails[Side::Term as usize];
-            let dtf = text_fails[Side::Definition as usize];
-            println!("Text fails:    |{tf:^10}|{ttf:^10}|{dtf:^10}|");
+        impl StatsSection {
+            fn print(&self) {
+                self.made.print();
+                self.fails.print();
+                let fail_prop = StatsLine {
+                    tag: "",
+                    term: Proportion(self.made.term, self.fails.term),
+                    definition: Proportion(self.made.definition, self.fails.definition),
+                    total: Proportion(self.made.total, self.fails.total),
+                };
+                fail_prop.print();
+            }
 
-            // Proportions
-            let tfp = Proportion(te, tf);
-            let ttfp = Proportion(tte, ttf);
-            let dtfp = Proportion(dte, dtf);
-            println!("               |{tfp:^10}|{ttfp:^10}|{dtfp:^10}|");
+            fn try_print(&self) {
+                if self.is_used() {
+                    self.print();
+                }
+            }
+
+            fn is_used(&self) -> bool {
+                self.made.total > 0
+            }
+        }
+
+        impl<T: Display> StatsLine<T> {
+            fn print(&self) {
+                let StatsLine {
+                    tag,
+                    term,
+                    definition,
+                    total,
+                } = self;
+                println!("{tag:15} |{total:^10}|{term:^10}|{definition:^10}|");
+            }
+        }
+
+        impl<T: Copy + Add<Output = T>> StatsLine<T> {
+            fn new(tag: &'static str, data: [T; 2]) -> Self {
+                let term = data[Side::Term as usize];
+                let definition = data[Side::Definition as usize];
+                Self {
+                    tag,
+                    term,
+                    definition,
+                    total: term + definition,
+                }
+            }
+
+            fn add(tag: &'static str, a: &Self, b: &Self) -> Self {
+                Self {
+                    tag,
+                    term: a.term + b.term,
+                    definition: a.definition + b.definition,
+                    total: a.total + b.total,
+                }
+            }
+        }
+
+        let matches = StatsSection {
+            made: StatsLine::new("Matches made:", matches_made),
+            fails: StatsLine::new("Match fails:", match_fails),
+        };
+        matches.try_print();
+
+        let texts = StatsSection {
+            made: StatsLine::new("Texts entered:", texts_entered),
+            fails: StatsLine::new("Text fails:", text_fails),
+        };
+        texts.try_print();
+
+        if matches.is_used() && texts.is_used() {
+            let total = StatsSection {
+                made: StatsLine::add("Total answered:", &matches.made, &texts.made),
+                fails: StatsLine::add("Total fails:", &matches.fails, &texts.fails),
+            };
+            total.print();
+        }
+
+        const COLORS: [Color; 5] = [
+            Color::Grey,
+            Color::Yellow,
+            Color::Red,
+            Color::Magenta,
+            Color::Blue,
+        ];
+        fn get_color(color: usize) -> Color {
+            *COLORS.get(color - 1).unwrap_or(&Color::Cyan)
+        }
+
+        let mut fails: Vec<_> = fails
+            .iter()
+            .filter_map(|fail| {
+                (fail.total_fails() > FailCount::ZERO)
+                    .then(|| (fail.total_fails(), fail.card[!fail.side].display()))
+            })
+            .collect();
+        fails.sort_unstable_by(|a, b| (a.0.cmp(&b.0)).then_with(|| a.1.cmp(b.1)));
+
+        if matches.is_used() {
+            println!("\n{}", "Fails:".bold());
+            for (count, text) in fails {
+                execute!(
+                    io::stdout(),
+                    style::SetForegroundColor(get_color(count.count() as usize)),
+                    style::Print(format!("  {text} ({count})\n")),
+                    style::SetForegroundColor(Color::Reset),
+                )
+                .unwrap();
+            }
         }
     }
 }

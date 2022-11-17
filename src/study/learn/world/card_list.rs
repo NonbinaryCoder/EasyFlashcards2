@@ -40,6 +40,12 @@ impl<'a> From<&Item<'a>> for FailedItem<'a> {
     }
 }
 
+impl<'a> FailedItem<'a> {
+    pub fn total_fails(&self) -> FailCount {
+        self.match_fails + self.text_fails
+    }
+}
+
 /// A token representing an item in a card list
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token(usize);
@@ -199,11 +205,11 @@ impl<'a> CardList<'a> {
         self.cards.len()
     }
 
-    pub fn fails(&mut self) -> &[FailedItem] {
+    pub fn fails(&mut self) -> &mut [FailedItem<'a>] {
         self.removed.extend(self.cards.iter().filter_map(|item| {
             (item.match_fails.has_failed() || item.text_fails.has_failed()).then_some(item.into())
         }));
-        &self.removed
+        &mut self.removed
     }
 }
 
@@ -282,9 +288,9 @@ impl StudyType {
 }
 
 pub mod fail_count {
-    use std::fmt;
+    use std::{fmt, ops::Add};
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     pub struct FailCount(u8);
 
     impl fmt::Display for FailCount {
@@ -320,6 +326,14 @@ pub mod fail_count {
 
         pub fn count(&self) -> u8 {
             self.0
+        }
+    }
+
+    impl Add<FailCount> for FailCount {
+        type Output = FailCount;
+
+        fn add(self, rhs: FailCount) -> Self::Output {
+            FailCount(self.0.saturating_add(rhs.0))
         }
     }
 }
